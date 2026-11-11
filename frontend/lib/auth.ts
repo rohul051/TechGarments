@@ -1,17 +1,31 @@
 import type { User } from '@/types/user';
 
+const demoAccounts: Record<string, { password: string; fullName: string; role: User['role'] }> = {
+  'buyer@threadline.demo': {
+    password: 'buyer1234',
+    fullName: 'Alex Morgan',
+    role: 'BUYER',
+  },
+  'factory@threadline.demo': {
+    password: 'factory1234',
+    fullName: 'Samira Rahman',
+    role: 'FACTORY',
+  },
+};
+
 export async function login(email: string, password: string): Promise<User> {
   await new Promise((resolve) => setTimeout(resolve, 500));
 
-  if (password.length < 4) {
-    throw new Error('Password must be at least 4 characters long');
+  const account = demoAccounts[email.trim().toLowerCase()];
+  if (!account || password !== account.password) {
+    throw new Error('The email or password you entered is incorrect.');
   }
 
   const user: User = {
     id: crypto.randomUUID(),
-    email,
-    fullName: email.split('@')[0],
-    role: email.includes('factory') ? 'FACTORY' : 'BUYER',
+    email: email.trim().toLowerCase(),
+    fullName: account.fullName,
+    role: account.role,
   };
 
   localStorage.setItem('user', JSON.stringify(user));
