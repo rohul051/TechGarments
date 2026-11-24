@@ -1,0 +1,42 @@
+{
+  "name": "techgarments-backend",
+  "version": "1.0.0",
+  "description": "Backend API for TechGarments garment manufacturing platform powered by Express and Firebase Firestore",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test:firebase": "tsx src/scripts/testFirebase.ts",
+    "seed": "tsx src/scripts/seedData.ts"
+  },
+  "keywords": [
+    "techgarments",
+    "garment",
+    "manufacturing",
+    "firebase",
+    "firestore",
+    "express",
+    "typescript"
+  ],
+  "author": "TechGarments Team",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.1.0",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/morgan": "^1.9.9",
+    "@types/node": "^20.17.19",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

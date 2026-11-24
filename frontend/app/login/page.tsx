@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -12,34 +12,36 @@ import {
   Check,
   Eye,
   EyeOff,
-  Factory,
   LockKeyhole,
   Mail,
   ShieldCheck,
   Sparkles,
   Shirt,
-  ShoppingBag,
 } from "lucide-react";
 import { login } from "@/lib/auth";
 
 const loginSchema = z.object({
-  email: z.string().email("Enter a valid email address"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  identifier: z.string().min(2, "Enter your username or email address"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
 type LoginValues = z.infer<typeof loginSchema>;
 
-const demoAccounts = [
-  { role: "Buyer", email: "buyer@threadline.demo", password: "buyer1234", icon: ShoppingBag },
-  { role: "Factory", email: "factory@threadline.demo", password: "factory1234", icon: Factory },
-];
-
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const registeredParam = searchParams.get("registered");
+  const identifierParam = searchParams.get("identifier") || searchParams.get("email");
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(() =>
+    registeredParam === "true"
+      ? "Account created successfully! Please sign in with your username/gmail and password."
+      : null,
+  );
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+
   const {
     register,
     handleSubmit,
@@ -47,26 +49,31 @@ export default function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: "", password: "" },
+    defaultValues: { identifier: identifierParam || "", password: "" },
   });
 
-  function chooseDemoAccount(account: (typeof demoAccounts)[number]) {
-    setValue("email", account.email, { shouldValidate: true });
-    setValue("password", account.password, { shouldValidate: true });
-    setErrorMessage(null);
-    setSuccessMessage(null);
-  }
+  useEffect(() => {
+    if (identifierParam) {
+      setValue("identifier", identifierParam, { shouldValidate: true });
+    }
+  }, [identifierParam, setValue]);
 
-  async function onSubmit({ email, password }: LoginValues) {
+  async function onSubmit({ identifier, password }: LoginValues) {
     setErrorMessage(null);
     setSuccessMessage(null);
 
     try {
-      const user = await login(email, password);
+      const user = await login(identifier, password);
       localStorage.setItem("rememberMe", String(rememberMe));
-      setSuccessMessage(`Welcome back, ${user.fullName}. Taking you to your workspace...`);
+      setSuccessMessage(`Welcome back, ${user.fullName}. Taking you to your dashboard...`);
       window.setTimeout(() => {
-        router.push(user.role === "BUYER" ? "/buyer/dashboard" : "/factory/dashboard");
+        if (user.role === "ADMIN") {
+          router.push("/admin/dashboard");
+        } else if (user.role === "BUYER") {
+          router.push("/buyer/dashboard");
+        } else {
+          router.push("/factory/dashboard");
+        }
       }, 750);
     } catch (error) {
       setErrorMessage(
@@ -102,18 +109,26 @@ export default function LoginPage() {
         </div>
 
         <div className="login-features">
-          <div className="login-feature"><span><ShieldCheck size={17} /></span><div><b>Verified manufacturing partners</b><small>Work with trusted, vetted factories.</small></div></div>
-          <div className="login-feature"><span><Sparkles size={17} /></span><div><b>AI-powered factory matching</b><small>Find the right production fit, faster.</small></div></div>
-          <div className="login-feature"><span><Factory size={17} /></span><div><b>Smart production management</b><small>Keep every order moving forward.</small></div></div>
+          <div className="login-feature">
+            <span><ShieldCheck size={16} /></span>
+            <div><b>Verified Manufacturers</b><small>100% compliance checked</small></div>
+          </div>
+          <div className="login-feature">
+            <span><Sparkles size={16} /></span>
+            <div><b>Smart Order Tracking</b><small>Live milestone production status</small></div>
+          </div>
         </div>
 
-        <div className="login-brand-footer"><span>BUILT FOR THE PEOPLE WHO MAKE THINGS</span><span>© 2026 GarmentConnect</span></div>
+        <div className="login-brand-footer">
+          <span>THREADLINE OS</span>
+          <span>ENTERPRISE GRADE SOURCING</span>
+        </div>
       </section>
 
       <section className="login-form-panel">
         <div className="login-mobile-brand">
-          <Link className="login-brand" href="/" aria-label="GarmentConnect home">
-            <span className="login-brand-mark"><Shirt size={18} /></span>
+          <Link className="login-brand" href="/">
+            <span className="login-brand-mark"><Shirt size={19} /></span>
             <span>GarmentConnect<span className="login-brand-dot">.</span></span>
           </Link>
         </div>
@@ -122,25 +137,25 @@ export default function LoginPage() {
           <div className="login-welcome">
             <span className="login-form-eyebrow">YOUR WORKSPACE IS WAITING</span>
             <h2>Welcome back<span>.</span></h2>
-            <p>Sign in to your account to continue.</p>
+            <p>Sign in to your account with your username or email.</p>
           </div>
 
           <form className="login-form" onSubmit={handleSubmit(onSubmit)} noValidate>
-            <label className="login-field" htmlFor="email">
-              <span>Email address</span>
-              <span className={`login-input-wrap ${errors.email ? "login-input-error" : ""}`}>
+            <label className="login-field" htmlFor="identifier">
+              <span>Username or Gmail / Email address</span>
+              <span className={`login-input-wrap ${errors.identifier ? "login-input-error" : ""}`}>
                 <Mail size={17} />
                 <input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="Enter your email address"
-                  aria-invalid={Boolean(errors.email)}
-                  aria-describedby={errors.email ? "email-error" : undefined}
-                  {...register("email")}
+                  id="identifier"
+                  type="text"
+                  autoComplete="username email"
+                  placeholder="e.g. rohul1 or rohul1@gmail.com"
+                  aria-invalid={Boolean(errors.identifier)}
+                  aria-describedby={errors.identifier ? "identifier-error" : undefined}
+                  {...register("identifier")}
                 />
               </span>
-              {errors.email && <small className="login-error-text" id="email-error">{errors.email.message}</small>}
+              {errors.identifier && <small className="login-error-text" id="identifier-error">{errors.identifier.message}</small>}
             </label>
 
             <label className="login-field" htmlFor="password">
@@ -175,50 +190,53 @@ export default function LoginPage() {
                   checked={rememberMe}
                   onChange={(event) => setRememberMe(event.target.checked)}
                 />
-                <span className="remember-box"><Check size={12} /></span>
+                <span className="remember-box"><Check size={11} strokeWidth={3} /></span>
                 <span>Remember me</span>
               </label>
+
               <Link href="/forgot-password">Forgot password?</Link>
             </div>
 
             {errorMessage && (
               <div className="login-alert login-alert-error" role="alert">
-                <span>!</span>{errorMessage}
-              </div>
-            )}
-            {successMessage && (
-              <div className="login-alert login-alert-success" role="status">
-                <Check size={15} />{successMessage}
+                <span>!</span>
+                <div>{errorMessage}</div>
               </div>
             )}
 
-            <button className="login-submit" type="submit" disabled={isSubmitting || Boolean(successMessage)}>
-              {isSubmitting ? <><span className="login-spinner" />Signing you in...</> : successMessage ? <>Signed in <Check size={17} /></> : <>Sign in <ArrowRight size={17} /></>}
+            {successMessage && (
+              <div className="login-alert login-alert-success" role="status">
+                <span>✓</span>
+                <div>{successMessage}</div>
+              </div>
+            )}
+
+            <button className="login-submit" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? <><span className="login-spinner" /> Signing in...</> : <>Sign in <ArrowRight size={16} /></>}
             </button>
           </form>
 
-          <div className="login-divider"><span>OR TRY A DEMO ACCOUNT</span></div>
-          <div className="demo-account-list">
-            {demoAccounts.map((account) => {
-              const Icon = account.icon;
-              return (
-                <button className="demo-account" type="button" key={account.role} onClick={() => chooseDemoAccount(account)}>
-                  <span className="demo-account-icon"><Icon size={16} /></span>
-                  <span><b>{account.role} demo</b><small>{account.email}</small></span>
-                  <ArrowRight size={15} />
-                </button>
-              );
-            })}
-          </div>
-
-          <p className="login-register-prompt">
-            Don&apos;t have an account? <Link href="/Register">Create account <ArrowRight size={14} /></Link>
+          <p className="login-register-prompt" style={{ marginTop: 28 }}>
+            Don&apos;t have an account? <Link href="/Register">Register here <ArrowRight size={13} /></Link>
           </p>
 
-          <div className="login-security-note"><ShieldCheck size={14} /> Secure access to your manufacturing workspace</div>
+          <div className="login-security-note">
+            <Check size={14} /> End-to-end encrypted production workspace
+          </div>
         </div>
-        <div className="login-mobile-footer"><Link href="/Register">Create account</Link><span>·</span><a href="#privacy">Privacy</a><span>·</span><a href="#help">Help</a></div>
+
+        <div className="login-mobile-footer">
+          <p>By signing in, you agree to our Terms and Privacy Policy.</p>
+        </div>
       </section>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="login-experience" />}>
+      <LoginForm />
+    </Suspense>
   );
 }

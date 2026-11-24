@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Firebase Service Account Credentials (NEVER COMMIT SENSITIVE KEYS)
+serviceAccountKey.json
+*-firebase-adminsdk-*.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

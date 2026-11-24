@@ -313,7 +313,7 @@ function DataTable({
   return (
     <div className={`workspace-table-wrap ${className}`}>
       <table className="workspace-table">
-        <thead><tr>{headers.map((header) => <th key={header}>{header}</th>)}</tr></thead>
+        <thead><tr>{headers.map((header, index) => <th key={`${header || "col"}-${index}`}>{header}</th>)}</tr></thead>
         <tbody>{children}</tbody>
       </table>
     </div>

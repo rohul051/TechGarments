@@ -17,7 +17,11 @@ export const metadata: Metadata = {
   description: "Connect with trusted garment manufacturing partners and discover new production opportunities.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="en"
