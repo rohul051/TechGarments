@@ -103,7 +103,7 @@ export class AuthController {
       const user = await UserService.getUserByEmail(cleanEmail);
 
       if (!user) {
-        throw ApiError.unauthorized('Invalid email/username or password. Please register first.');
+        throw ApiError.unauthorized('Invalid email or password. Please register first.');
       }
 
       const fullProfile = await UserService.getFullUserProfile(user.uid);

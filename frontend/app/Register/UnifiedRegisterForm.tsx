@@ -8,7 +8,6 @@ import {
   Check,
   Factory,
   Mail,
-  Shirt,
   ShoppingBag,
   UserRound,
 } from "lucide-react";
@@ -87,10 +86,29 @@ export function UnifiedRegisterForm({
     setPasswordError("");
 
     const form = event.currentTarget;
-    const data = new FormData(form);
+    if (!form.checkValidity()) {
+      form.reportValidity();
+      return;
+    }
 
+    const data = new FormData(form);
+    const email = String(data.get("email") || "").trim().toLowerCase();
     const password = String(data.get("password") || "");
     const confirmPassword = String(data.get("confirmPassword") || "");
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setPasswordError("Please enter a valid email address.");
+      const emailInput = form.elements.namedItem("email");
+      if (emailInput instanceof HTMLInputElement) emailInput.focus();
+      return;
+    }
+
+    if (password.length < 8) {
+      setPasswordError("Password must be at least 8 characters long.");
+      const passwordInput = form.elements.namedItem("password");
+      if (passwordInput instanceof HTMLInputElement) passwordInput.focus();
+      return;
+    }
 
     if (password !== confirmPassword) {
       setPasswordError("Passwords do not match. Please verify.");
@@ -103,19 +121,17 @@ export function UnifiedRegisterForm({
 
     setIsSubmitting(true);
 
-    const email = String(data.get("email") || "").trim();
-    const username = String(data.get("username") || email.split("@")[0]).trim();
-    const fullName = String(data.get("fullName") || (selectedRole === "BUYER" ? "Brand Partner" : "Factory Partner"));
-    const phone = String(data.get("phone") || "");
-    const companyName = String(data.get("companyName") || (selectedRole === "BUYER" ? "My Brand" : "Garment Factory"));
-    const country = String(data.get("country") || "Other");
-    const website = String(data.get("website") || "");
+    const fullName = String(data.get("fullName") || (selectedRole === "BUYER" ? "Brand Partner" : "Factory Partner")).trim();
+    const phone = String(data.get("phone") || "").trim();
+    const companyName = String(data.get("companyName") || (selectedRole === "BUYER" ? "My Brand" : "Garment Factory")).trim();
+    const country = String(data.get("country") || "Other").trim();
+    const website = String(data.get("website") || "").trim();
 
     // Buyer-specific fields
     const buyerType = String(data.get("buyerType") || "Clothing Brand");
 
     // Factory-specific fields
-    const city = String(data.get("city") || "");
+    const city = String(data.get("city") || "").trim();
     const monthlyCapacityStr = String(data.get("monthlyCapacity") || "50000");
     const monthlyCapacity = parseInt(monthlyCapacityStr.replace(/\D/g, ""), 10) || 50000;
     const moqStr = String(data.get("moq") || "500");
@@ -127,7 +143,6 @@ export function UnifiedRegisterForm({
     try {
       await register({
         email,
-        username,
         password,
         fullName,
         role: selectedRole,
@@ -148,10 +163,10 @@ export function UnifiedRegisterForm({
 
       setSubmitted(true);
 
-      // Transition smoothly to the login page with prefilled username/email
+      // Transition smoothly to the login page with prefilled registered email
       window.setTimeout(() => {
         router.push(
-          `/login?registered=true&identifier=${encodeURIComponent(username || email)}`,
+          `/login?registered=true&email=${encodeURIComponent(email)}`,
         );
       }, 1200);
     } catch (err) {
@@ -242,15 +257,8 @@ export function UnifiedRegisterForm({
             autoComplete="name"
           />
           <FormField
-            id="username"
-            label="Username / ID"
-            placeholder="e.g. rohul1"
-            icon={<Shirt size={16} />}
-            required={true}
-          />
-          <FormField
             id="email"
-            label="Business Email / Gmail address"
+            label="Email address (Login Email ID)"
             type="email"
             placeholder={selectedRole === "BUYER" ? "you@brand.com" : "you@factory.com"}
             icon={<Mail size={16} />}

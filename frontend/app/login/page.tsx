@@ -21,7 +21,7 @@ import {
 import { login } from "@/lib/auth";
 
 const loginSchema = z.object({
-  identifier: z.string().min(2, "Enter your username or email address"),
+  email: z.string().email("Enter a valid registered email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
@@ -32,12 +32,12 @@ function LoginForm() {
   const searchParams = useSearchParams();
   const registeredParam = searchParams.get("registered");
   const deletedParam = searchParams.get("deleted");
-  const identifierParam = searchParams.get("identifier") || searchParams.get("email");
+  const emailParam = searchParams.get("email");
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(() =>
     registeredParam === "true"
-      ? "Account created successfully! Please sign in with your username/gmail and password."
+      ? "Account created successfully! Please sign in with your registered email address and password."
       : deletedParam === "true"
         ? "Your buyer account has been permanently deleted."
         : null,
@@ -52,21 +52,21 @@ function LoginForm() {
     formState: { errors, isSubmitting },
   } = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
-    defaultValues: { identifier: identifierParam || "", password: "" },
+    defaultValues: { email: emailParam || "", password: "" },
   });
 
   useEffect(() => {
-    if (identifierParam) {
-      setValue("identifier", identifierParam, { shouldValidate: true });
+    if (emailParam && emailParam.includes("@")) {
+      setValue("email", emailParam, { shouldValidate: true });
     }
-  }, [identifierParam, setValue]);
+  }, [emailParam, setValue]);
 
-  async function onSubmit({ identifier, password }: LoginValues) {
+  async function onSubmit({ email, password }: LoginValues) {
     setErrorMessage(null);
     setSuccessMessage(null);
 
     try {
-      const user = await login(identifier, password);
+      const user = await login(email, password);
       localStorage.setItem("rememberMe", String(rememberMe));
       setSuccessMessage(`Welcome back, ${user.fullName}. Taking you to your dashboard...`);
       window.setTimeout(() => {
@@ -140,25 +140,25 @@ function LoginForm() {
           <div className="login-welcome">
             <span className="login-form-eyebrow">YOUR WORKSPACE IS WAITING</span>
             <h2>Welcome back<span>.</span></h2>
-            <p>Sign in to your account with your username or email.</p>
+            <p>Sign in with your registered email address and password (Buyer or Factory).</p>
           </div>
 
           <form className="login-form" onSubmit={handleSubmit(onSubmit)} noValidate>
-            <label className="login-field" htmlFor="identifier">
-              <span>Username or Gmail / Email address</span>
-              <span className={`login-input-wrap ${errors.identifier ? "login-input-error" : ""}`}>
+            <label className="login-field" htmlFor="email">
+              <span>Registered Email address</span>
+              <span className={`login-input-wrap ${errors.email ? "login-input-error" : ""}`}>
                 <Mail size={17} />
                 <input
-                  id="identifier"
-                  type="text"
-                  autoComplete="username email"
-                  placeholder="e.g. rohul1 or rohul1@gmail.com"
-                  aria-invalid={Boolean(errors.identifier)}
-                  aria-describedby={errors.identifier ? "identifier-error" : undefined}
-                  {...register("identifier")}
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="e.g. you@company.com"
+                  aria-invalid={Boolean(errors.email)}
+                  aria-describedby={errors.email ? "email-error" : undefined}
+                  {...register("email")}
                 />
               </span>
-              {errors.identifier && <small className="login-error-text" id="identifier-error">{errors.identifier.message}</small>}
+              {errors.email && <small className="login-error-text" id="email-error">{errors.email.message}</small>}
             </label>
 
             <label className="login-field" htmlFor="password">
