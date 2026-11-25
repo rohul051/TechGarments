@@ -14,3 +14,20 @@ export interface User {
   role: Role;
   adminRole?: AdminRole;
 }
+
+export interface FactoryProfileDetails {
+  fullName: string;
+  email: string;
+  phone: string;
+  companyName: string;
+  country: string;
+  city: string;
+  website: string;
+  monthlyCapacity: number;
+  moq: number;
+  processes: string[];
+  products: string[];
+  workerCount?: number;
+  productionLines?: number;
+  machineInformation?: string;
+}

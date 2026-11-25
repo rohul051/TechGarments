@@ -38,11 +38,56 @@ service cloud.firestore {
         resource.data.factoryId == request.auth.uid ||
         resource.data.factoryId == null // Public RFQs
       );
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() && (
-        resource.data.buyerId == request.auth.uid || 
+      allow create: if isAuthenticated() &&
+        request.resource.data.buyerId == request.auth.uid && (
+          (
+            request.resource.data.factoryId == null &&
+            request.resource.data.status == "PENDING_QUOTE"
+          ) ||
+          (
+            request.resource.data.factoryId is string &&
+            request.resource.data.status == "PENDING_FACTORY_CONFIRMATION" &&
+            request.resource.data.quoteId is string &&
+            exists(/databases/$(database)/documents/quotes/$(request.resource.data.quoteId)) &&
+            get(/databases/$(database)/documents/quotes/$(request.resource.data.quoteId)).data.buyerId == request.auth.uid &&
+            get(/databases/$(database)/documents/quotes/$(request.resource.data.quoteId)).data.factoryId == request.resource.data.factoryId &&
+            get(/databases/$(database)/documents/quotes/$(request.resource.data.quoteId)).data.requestId == request.resource.data.requestId &&
+            get(/databases/$(database)/documents/quotes/$(request.resource.data.quoteId)).data.status == "PENDING"
+          )
+        );
+      allow update: if isAuthenticated() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status", "updatedAt"]) &&
+        request.resource.data.buyerId == resource.data.buyerId &&
+        request.resource.data.factoryId == resource.data.factoryId &&
+        (
+          (
+            resource.data.buyerId == request.auth.uid &&
+            request.resource.data.status == resource.data.status
+          ) ||
+          (
+            resource.data.factoryId == request.auth.uid &&
+            resource.data.status == "PENDING_FACTORY_CONFIRMATION" &&
+            request.resource.data.status in ["CONFIRMED", "CANCELLED"]
+          )
+      );
+    }
+
+    // Factory quotations are visible only to the factory and the buyer on the source RFQ.
+    match /quotes/{quoteId} {
+      allow read: if isAuthenticated() && (
+        resource.data.buyerId == request.auth.uid ||
         resource.data.factoryId == request.auth.uid
       );
+      allow create: if isAuthenticated() &&
+        request.resource.data.factoryId == request.auth.uid &&
+        request.resource.data.requestId is string &&
+        request.resource.data.pricePerUnit is number &&
+        request.resource.data.pricePerUnit > 0 &&
+        exists(/databases/$(database)/documents/orders/$(request.resource.data.requestId)) &&
+        get(/databases/$(database)/documents/orders/$(request.resource.data.requestId)).data.buyerId == request.resource.data.buyerId &&
+        get(/databases/$(database)/documents/orders/$(request.resource.data.requestId)).data.factoryId == null &&
+        get(/databases/$(database)/documents/orders/$(request.resource.data.requestId)).data.status == "PENDING_QUOTE";
+      allow update, delete: if false;
     }
 
     // Products catalog

@@ -1,13 +1,18 @@
 import {
+  browserLocalPersistence,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  setPersistence,
   signOut as firebaseSignOut,
+  type User as FirebaseAuthUser,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import type { User, Role } from '@/types/user';
 
 export interface AccountRecord {
+  id?: string;
   email: string;
   username?: string;
   password: string;
@@ -23,10 +28,76 @@ export interface AccountRecord {
   moq?: number;
   processes?: string[];
   products?: string[];
+  workerCount?: number;
+  productionLines?: number;
+  machineInformation?: string;
 }
 
 const STORAGE_USERS_KEY = 'techgarments_registered_users';
 const STORAGE_CURRENT_USER_KEY = 'user';
+
+function isRole(value: unknown): value is Role {
+  return value === 'BUYER' || value === 'FACTORY' || value === 'ADMIN';
+}
+
+function normalizeRole(value: unknown): Role | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toUpperCase();
+  return isRole(normalized) ? normalized : null;
+}
+
+export function saveCurrentUser(user: User): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(user));
+  window.dispatchEvent(new Event('storage'));
+}
+
+export function waitForFirebaseUser(): Promise<FirebaseAuthUser | null> {
+  if (auth.currentUser) return Promise.resolve(auth.currentUser);
+  return new Promise((resolve, reject) => {
+    let unsubscribe = () => {};
+    unsubscribe = onAuthStateChanged(
+      auth,
+      (firebaseUser) => {
+        unsubscribe();
+        resolve(firebaseUser);
+      },
+      (error) => {
+        unsubscribe();
+        reject(error);
+      },
+    );
+  });
+}
+
+export async function restoreUserFromFirebase(): Promise<User | null> {
+  const firebaseUser = await waitForFirebaseUser();
+  const email = firebaseUser?.email?.trim().toLowerCase();
+  if (!firebaseUser || !email) return null;
+
+  const account = findAccount(email);
+  let userProfile: Record<string, unknown> = {};
+  try {
+    const userSnapshot = await getDoc(doc(db, 'users', firebaseUser.uid));
+    if (userSnapshot.exists()) userProfile = userSnapshot.data();
+  } catch (error) {
+    if (!account) throw error;
+    console.error('[Auth] Could not restore the cloud profile; using the registered local account:', error);
+  }
+
+  const role = normalizeRole(userProfile.role) ?? normalizeRole(account?.role);
+  if (!isRole(role)) return null;
+
+  const user: User = {
+    id: firebaseUser.uid,
+    email,
+    fullName: account?.fullName || (typeof userProfile.fullName === 'string' ? userProfile.fullName : '') || email.split('@')[0],
+    role,
+    ...(role === 'ADMIN' ? { adminRole: 'SUPER_ADMIN' as const } : {}),
+  };
+  saveCurrentUser(user);
+  return user;
+}
 
 // Built-in administrative account for platform management
 const DEFAULT_ADMIN_ACCOUNT: AccountRecord = {
@@ -85,6 +156,7 @@ export function saveRegisteredAccount(account: AccountRecord): void {
     localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(current));
   } catch (err) {
     console.error('Failed to save user account:', err);
+    throw err;
   }
 }
 
@@ -174,6 +246,7 @@ export async function register(accountData: AccountRecord): Promise<User> {
   // 2. Save locally
   saveRegisteredAccount({
     ...accountData,
+    id: uid,
     email,
     username,
   });
@@ -233,23 +306,27 @@ export async function login(identifier: string, password: string): Promise<User>
       throw new Error('The password you entered is incorrect.');
     }
 
+    const role = normalizeRole(matched.role);
+    if (!role) throw new Error('This account has an invalid role. Contact support for help.');
+
+    const userId = matched.id || `local:${matched.email.trim().toLowerCase()}`;
+
     const user: User = {
-      id: crypto.randomUUID(),
+      id: userId,
       email: matched.email,
       fullName: matched.fullName,
-      role: matched.role,
-      ...(matched.role === 'ADMIN' ? { adminRole: 'SUPER_ADMIN' as const } : {}),
+      role,
+      ...(role === 'ADMIN' ? { adminRole: 'SUPER_ADMIN' as const } : {}),
     };
 
-    localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(user));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('storage'));
-    }
+    saveCurrentUser(user);
 
-    // Also sync Firebase Auth in background
     try {
-      signInWithEmailAndPassword(auth, matched.email, password).catch(() => {});
-    } catch {}
+      await setPersistence(auth, browserLocalPersistence);
+      await signInWithEmailAndPassword(auth, matched.email, password);
+    } catch (error) {
+      console.warn('[Firebase Auth] Could not persist local-account sign-in; retaining the local session:', error);
+    }
 
     return user;
   }
@@ -257,6 +334,11 @@ export async function login(identifier: string, password: string): Promise<User>
   // 2. Check Firebase Authentication with email
   if (clean.includes('@')) {
     try {
+      try {
+        await setPersistence(auth, browserLocalPersistence);
+      } catch (error) {
+        console.warn('[Firebase Auth] Could not enable browser-local persistence:', error);
+      }
       const userCredential = await signInWithEmailAndPassword(auth, clean, password);
       const firebaseUid = userCredential.user.uid;
 
@@ -268,12 +350,9 @@ export async function login(identifier: string, password: string): Promise<User>
             id: firebaseUid,
             email: clean,
             fullName: data.fullName || clean.split('@')[0],
-            role: (data.role as Role) || 'BUYER',
+            role: normalizeRole(data.role) ?? 'BUYER',
           };
-          localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(user));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('storage'));
-    }
+          saveCurrentUser(user);
           return user;
         }
       } catch {
@@ -286,10 +365,7 @@ export async function login(identifier: string, password: string): Promise<User>
         fullName: clean.split('@')[0],
         role: 'BUYER',
       };
-      localStorage.setItem(STORAGE_CURRENT_USER_KEY, JSON.stringify(user));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('storage'));
-    }
+      saveCurrentUser(user);
       return user;
     } catch (firebaseError: unknown) {
       console.warn('[Firebase Auth Error]:', firebaseError);
@@ -307,13 +383,36 @@ export function logout(): void {
     // Ignore error
   }
   if (typeof window !== 'undefined') {
-    localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+    try {
+      localStorage.removeItem(STORAGE_CURRENT_USER_KEY);
+    } catch (error) {
+      console.error('[Auth] Could not clear the local session:', error);
+    }
     window.dispatchEvent(new Event('storage'));
   }
 }
 
 export function getUser(): User | null {
   if (typeof window === 'undefined') return null;
-  const user = localStorage.getItem(STORAGE_CURRENT_USER_KEY);
-  return user ? (JSON.parse(user) as User) : null;
+  try {
+    const stored = localStorage.getItem(STORAGE_CURRENT_USER_KEY);
+    if (!stored) return null;
+
+    const user = JSON.parse(stored) as Partial<User>;
+    const role = normalizeRole(user.role);
+    if (
+      typeof user.id === 'string' &&
+      typeof user.email === 'string' &&
+      typeof user.fullName === 'string' &&
+      role
+    ) {
+      return { ...user, role } as User;
+    }
+
+    console.error('[Auth] Stored user session is invalid.');
+    return null;
+  } catch (error) {
+    console.error('[Auth] Could not read the stored user session:', error);
+    return null;
+  }
 }

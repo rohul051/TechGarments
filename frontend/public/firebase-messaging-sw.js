@@ -6,12 +6,13 @@ importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-com
 
 // Initialize Firebase in the service worker
 firebase.initializeApp({
-  apiKey: "AIzaSyCO9z-EeRxTMj6hzythA26TzS25g6oPS0I",
-  authDomain: "techgarments-cdd93.firebaseapp.com",
-  projectId: "techgarments-cdd93",
-  storageBucket: "techgarments-cdd93.firebasestorage.app",
-  messagingSenderId: "980261237573",
-  appId: "1:980261237573:web:d3548687cde0fc94f2842c"
+  apiKey: "AIzaSyDajiWrUprx3OKZhvIHsVo5ownQodE3CCw",
+  authDomain: "techgarments-a41d6.firebaseapp.com",
+  projectId: "techgarments-a41d6",
+  storageBucket: "techgarments-a41d6.firebasestorage.app",
+  messagingSenderId: "950565030381",
+  appId: "1:950565030381:web:96ab0f85f757feeb7dbfe4",
+  measurementId: "G-06RK67L16F"
 });
 
 const messaging = firebase.messaging();

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DashboardWorkspace } from "@/components/dashboard/workspace";
-import { getUser, logout } from "@/lib/auth";
+import { getUser, logout, restoreUserFromFirebase } from "@/lib/auth";
 import type { User } from "@/types/user";
 
 export default function BuyerDashboardPage() {
@@ -11,16 +11,25 @@ export default function BuyerDashboardPage() {
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    const currentUser = getUser();
-
-    if (!currentUser || currentUser.role !== "BUYER") {
-      router.replace("/login");
-      return;
+    let active = true;
+    async function initializeDashboard() {
+      const storedUser = getUser();
+      const currentUser = !storedUser || storedUser.role !== "BUYER"
+        ? (await restoreUserFromFirebase()) ?? storedUser
+        : storedUser;
+      if (!active) return;
+      if (!currentUser || currentUser.role !== "BUYER") {
+        router.replace("/login");
+        return;
+      }
+      queueMicrotask(() => {
+        if (active) setUser(currentUser);
+      });
     }
 
-    let active = true;
-    queueMicrotask(() => {
-      if (active) setUser(currentUser);
+    void initializeDashboard().catch((error: unknown) => {
+      console.error("[Buyer dashboard] Failed to restore the user session:", error);
+      if (active) router.replace("/login");
     });
 
     return () => {
@@ -34,6 +43,8 @@ export default function BuyerDashboardPage() {
     <DashboardWorkspace
       role="buyer"
       fullName={user.fullName}
+      userId={user.id}
+      userEmail={user.email}
       onLogout={() => {
         logout();
         router.push("/login");

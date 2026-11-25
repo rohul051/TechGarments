@@ -1,6 +1,7 @@
 export type OrderStatus =
   | 'DRAFT'
   | 'PENDING_QUOTE'
+  | 'PENDING_FACTORY_CONFIRMATION'
   | 'QUOTE_RECEIVED'
   | 'IN_NEGOTIATION'
   | 'CONFIRMED'
