@@ -51,8 +51,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { findAccount, getRegisteredAccounts, waitForFirebaseUser } from "@/lib/auth";
+import { loadBuyerSavedFactories, persistBuyerSavedFactories } from "@/lib/buyerSettings";
 import { auth, db } from "@/lib/firebase";
-import type { FactoryProfileDetails } from "@/types/user";
+import type { BuyerProfileDetails, BuyerTheme, FactoryProfileDetails } from "@/types/user";
+import { BuyerSettingsPage } from "./BuyerSettingsPage";
 
 export type DashboardRole = "buyer" | "factory";
 
@@ -1970,6 +1972,95 @@ function FactoryProfile({
   );
 }
 
+function BuyerCompanyProfile({
+  profile,
+  onEdit,
+}: {
+  profile: BuyerProfileDetails;
+  onEdit: () => void;
+}) {
+  const companyLogoText = (profile.companyName || profile.fullName || "MB").trim().slice(0, 2).toUpperCase();
+  const websiteHref = profile.website
+    ? /^https?:\/\//i.test(profile.website)
+      ? profile.website
+      : `https://${profile.website}`
+    : "";
+
+  return (
+    <>
+      <SectionHeading
+        eyebrow="YOUR BRAND IDENTITY"
+        title="Company profile"
+        description="Keep your company information up to date for factory partners."
+        action="Edit profile"
+        onAction={onEdit}
+      />
+      <div className="workspace-two-col">
+        <section className="workspace-panel profile-banner">
+          <div className="profile-cover" />
+          <div className="profile-main-info">
+            <div className="factory-logo buyer-logo">
+              {profile.photoURL ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={profile.photoURL} alt={profile.companyName || profile.fullName} className="buyer-logo-img" />
+              ) : (
+                companyLogoText
+              )}
+            </div>
+          </div>
+          <h2 className="company-profile-name">{profile.companyName || "My Brand"}</h2>
+          <p className="profile-description">
+            Registered buyer workspace managed by {profile.fullName || profile.email}. Connect with verified factories and share production briefs directly.
+          </p>
+          <div className="profile-detail-list">
+            <span>Buyer type</span>
+            <b>{profile.buyerType || "Clothing Brand"}</b>
+            <span>Country</span>
+            <b>{profile.country || "Not provided"}</b>
+            <span>Website</span>
+            <b>
+              {websiteHref ? (
+                <a href={websiteHref} target="_blank" rel="noreferrer" className="buyer-profile-link">
+                  {profile.website}
+                </a>
+              ) : (
+                "Not provided"
+              )}
+            </b>
+          </div>
+        </section>
+        <section className="workspace-panel">
+          <SectionHeading title="Account contact" />
+          <div className="contact-detail">
+            <Users size={16} />
+            <span>
+              <b>{profile.fullName || "Buyer account"}</b>
+              <small>{profile.buyerType || "Brand Partner"}</small>
+            </span>
+          </div>
+          <div className="contact-detail">
+            <Mail size={16} />
+            <span>
+              <b>Email address</b>
+              <small>{profile.email}</small>
+            </span>
+          </div>
+          <div className="contact-detail">
+            <MessageSquare size={16} />
+            <span>
+              <b>Phone number</b>
+              <small>{profile.phone || "Not provided"}</small>
+            </span>
+          </div>
+          <button className="outline-wide-button" onClick={onEdit}>
+            Edit profile in Settings <ArrowRight size={14} />
+          </button>
+        </section>
+      </div>
+    </>
+  );
+}
+
 function BuyerGenericPage({
   page,
   onContact,
@@ -1986,6 +2077,12 @@ function BuyerGenericPage({
   quoteFeedError,
   orderFeedError,
   storageError,
+  buyerProfile,
+  onSaveBuyerProfile,
+  buyerTheme,
+  onChangeBuyerTheme,
+  onResetBuyerAccount,
+  onDeleteBuyerAccount,
 }: {
   page: string;
   onContact: (title: string) => void;
@@ -2002,6 +2099,12 @@ function BuyerGenericPage({
   quoteFeedError: string;
   orderFeedError: string;
   storageError: string;
+  buyerProfile?: BuyerProfileDetails;
+  onSaveBuyerProfile?: (profile: BuyerProfileDetails) => Promise<string>;
+  buyerTheme?: BuyerTheme;
+  onChangeBuyerTheme?: (theme: BuyerTheme) => Promise<void> | void;
+  onResetBuyerAccount?: () => Promise<string>;
+  onDeleteBuyerAccount?: (password: string) => Promise<void>;
 }) {
   if (page === "Find Factories") return null;
   if (page === "Post Production Request") return null;
@@ -2014,6 +2117,21 @@ function BuyerGenericPage({
         <SectionHeading eyebrow="YOUR SHORTLIST" title="Saved factories" description="Keep your favorite manufacturing partners close at hand." />
         {saved.length ? <div className="marketplace-grid">{factories.filter((factory) => saved.includes(factory.id)).map((factory) => <FactoryCardView key={factory.id} factory={factory} saved onSave={() => onToggleSave(factory.id)} onContact={() => onViewFactory(factory)} />)}</div> : <EmptyState title="No saved factories yet" description="Save a factory from the marketplace and it will appear here." action="Find factories" onAction={() => onNavigate("Find Factories")} />}
       </>
+    );
+  }
+  if (page === "Company Profile" && buyerProfile) {
+    return <BuyerCompanyProfile profile={buyerProfile} onEdit={() => onNavigate("Settings")} />;
+  }
+  if (page === "Settings" && buyerProfile && onSaveBuyerProfile && onChangeBuyerTheme && onResetBuyerAccount && onDeleteBuyerAccount) {
+    return (
+      <BuyerSettingsPage
+        profile={buyerProfile}
+        theme={buyerTheme ?? "default"}
+        onSaveProfile={onSaveBuyerProfile}
+        onChangeTheme={onChangeBuyerTheme}
+        onResetAccount={onResetBuyerAccount}
+        onDeleteAccount={onDeleteBuyerAccount}
+      />
     );
   }
   return <UtilityPage page={page} onContact={onContact} />;
@@ -2206,6 +2324,12 @@ export function DashboardWorkspace({
   userEmail,
   factoryProfile,
   onSaveFactoryProfile,
+  buyerProfile,
+  onSaveBuyerProfile,
+  buyerTheme,
+  onChangeBuyerTheme,
+  onResetBuyerAccount,
+  onDeleteBuyerAccount,
   onLogout,
 }: {
   role: DashboardRole;
@@ -2214,12 +2338,18 @@ export function DashboardWorkspace({
   userEmail?: string;
   factoryProfile?: FactoryProfileDetails;
   onSaveFactoryProfile?: (profile: FactoryProfileDetails) => Promise<string>;
+  buyerProfile?: BuyerProfileDetails;
+  onSaveBuyerProfile?: (profile: BuyerProfileDetails) => Promise<string>;
+  buyerTheme?: BuyerTheme;
+  onChangeBuyerTheme?: (theme: BuyerTheme) => Promise<void> | void;
+  onResetBuyerAccount?: () => Promise<string>;
+  onDeleteBuyerAccount?: (password: string) => Promise<void>;
   onLogout: () => void;
 }) {
   const nav = role === "buyer" ? buyerNav : factoryNav;
   const [activePage, setActivePage] = useState("Overview");
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [saved, setSaved] = useState<string[]>([]);
+  const [saved, setSaved] = useState<string[]>(() => (role === "buyer" ? loadBuyerSavedFactories(userEmail) : []));
   const [factories, setFactories] = useState<FactoryCard[]>(() => role === "buyer" ? getLocalFactoryCards() : []);
   const [factoriesLoading, setFactoriesLoading] = useState(role === "buyer");
   const [factoryDirectoryError, setFactoryDirectoryError] = useState("");
@@ -2244,7 +2374,10 @@ export function DashboardWorkspace({
   const [factoryRequests, setFactoryRequests] = useState<FactoryOpportunity[]>([]);
   const [factoryRequestFeedError, setFactoryRequestFeedError] = useState("");
 
-  const firstName = fullName.split(/\s+/)[0] || (role === "buyer" ? "Alex" : "Samira");
+  const displayName = role === "buyer" ? buyerProfile?.fullName || fullName : fullName;
+  const buyerCompanyName = role === "buyer" ? buyerProfile?.companyName?.trim() || "Northstar Studio" : "";
+  const buyerAvatarUrl = role === "buyer" ? buyerProfile?.photoURL?.trim() || "" : "";
+  const firstName = displayName.split(/\s+/)[0] || (role === "buyer" ? "Alex" : "Samira");
   const subtitle = role === "buyer" ? "BUYER WORKSPACE" : "FACTORY WORKSPACE";
   const quoteOwnerKey = `${role}:${userId ?? ""}:${userEmail?.trim().toLowerCase() ?? ""}`;
   const storedQuotes = quoteState.ownerKey === quoteOwnerKey ? quoteState.quotes : [];
@@ -2884,7 +3017,25 @@ export function DashboardWorkspace({
   }
 
   function toggleSave(name: string) {
-    setSaved((current) => current.includes(name) ? current.filter((item) => item !== name) : [...current, name]);
+    setSaved((current) => {
+      const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
+      if (role === "buyer") {
+        persistBuyerSavedFactories(next, userEmail);
+      }
+      return next;
+    });
+  }
+
+  async function handleResetBuyerWorkspace(): Promise<string> {
+    if (!onResetBuyerAccount) {
+      throw new Error("Account reset is unavailable right now.");
+    }
+    const message = await onResetBuyerAccount();
+    setSaved([]);
+    setProductionRequests([]);
+    setQuoteState({ ownerKey: quoteOwnerKey, quotes: [] });
+    setOrderState({ ownerKey: quoteOwnerKey, orders: [] });
+    return message;
   }
 
   async function addProductionRequest(request: BuyerRequestRow): Promise<RequestSubmissionResult> {
@@ -2892,8 +3043,8 @@ export function DashboardWorkspace({
     const buyerAccount = userEmail ? findAccount(userEmail) : undefined;
     const savedRequest = {
       ...request,
-      buyerName: buyerAccount?.companyName || buyerAccount?.fullName || fullName,
-      location: buyerAccount?.country || "",
+      buyerName: buyerProfile?.companyName || buyerAccount?.companyName || buyerProfile?.fullName || buyerAccount?.fullName || fullName,
+      location: buyerProfile?.country || buyerAccount?.country || "",
       ownerId: userId,
       ownerEmail: userEmail?.trim().toLowerCase(),
     };
@@ -2934,17 +3085,41 @@ export function DashboardWorkspace({
     if (role === "buyer") {
       if (activePage === "Find Factories") return <Marketplace factories={factories} factoriesLoading={factoriesLoading} factoryDirectoryError={factoryDirectoryError} saved={saved} onToggleSave={toggleSave} onViewFactory={openFactoryProfile} />;
       if (activePage === "Post Production Request") return <PostRequest onSubmitted={addProductionRequest} />;
-      return <BuyerGenericPage page={activePage} onContact={openDialog} onNavigate={navigate} saved={saved} onToggleSave={toggleSave} factories={factories} onViewFactory={openFactoryProfile} requests={visibleRequests} quotes={storedQuotes} quoteFeedError={quoteFeedError} orders={storedOrders} orderFeedError={orderFeedError} onRequestOrder={placeOrderFromQuote} onRetryOrder={retrySendingOrder} storageError={typeof indexedDB === "undefined" ? "This browser does not support saving requests locally." : requestStorageError} />;
+      return (
+        <BuyerGenericPage
+          page={activePage}
+          onContact={openDialog}
+          onNavigate={navigate}
+          saved={saved}
+          onToggleSave={toggleSave}
+          factories={factories}
+          onViewFactory={openFactoryProfile}
+          requests={visibleRequests}
+          quotes={storedQuotes}
+          quoteFeedError={quoteFeedError}
+          orders={storedOrders}
+          orderFeedError={orderFeedError}
+          onRequestOrder={placeOrderFromQuote}
+          onRetryOrder={retrySendingOrder}
+          storageError={typeof indexedDB === "undefined" ? "This browser does not support saving requests locally." : requestStorageError}
+          buyerProfile={buyerProfile}
+          onSaveBuyerProfile={onSaveBuyerProfile}
+          buyerTheme={buyerTheme}
+          onChangeBuyerTheme={onChangeBuyerTheme}
+          onResetBuyerAccount={handleResetBuyerWorkspace}
+          onDeleteBuyerAccount={onDeleteBuyerAccount}
+        />
+      );
     }
     return <FactoryGenericPage page={activePage} onContact={openDialog} onViewOpportunity={openOpportunityDetails} onQuoteOpportunity={openOpportunityQuote} quotes={storedQuotes} quoteFeedError={quoteFeedError} orders={storedOrders} orderFeedError={orderFeedError} onConfirmOrder={confirmFactoryOrder} factoryProfile={factoryProfile} onSaveFactoryProfile={onSaveFactoryProfile} requests={factoryRequests} requestFeedError={factoryRequestFeedError} />;
   }
 
   return (
-    <div className={`dashboard-workspace ${role === "factory" ? "factory-workspace" : "buyer-workspace"}`}>
+    <div className={`dashboard-workspace ${role === "factory" ? "factory-workspace" : `buyer-workspace buyer-theme-${buyerTheme ?? "default"}`}`}>
       {mobileOpen && <button className="sidebar-backdrop" aria-label="Close menu" onClick={() => setMobileOpen(false)} />}
       <aside className={`workspace-sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand-wrap"><DashboardBrand /><button className="sidebar-close" aria-label="Close menu" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
-        <div className="workspace-switch"><span className={`workspace-switch-icon ${role}`}><BriefcaseBusiness size={16} /></span><span><b>{role === "buyer" ? "Northstar Studio" : "Evergreen Apparel"}</b><small>{subtitle}</small></span><ChevronDown size={15} /></div>
+        <div className="workspace-switch"><span className={`workspace-switch-icon ${role}`}><BriefcaseBusiness size={16} /></span><span><b>{role === "buyer" ? buyerCompanyName : "Evergreen Apparel"}</b><small>{subtitle}</small></span><ChevronDown size={15} /></div>
         <span className="sidebar-label">WORKSPACE</span>
         <nav className="sidebar-nav" aria-label="Dashboard navigation">
           {nav.map(({ label, icon: Icon }) => (
@@ -2958,14 +3133,40 @@ export function DashboardWorkspace({
         <div className="sidebar-bottom">
           <div className="help-card"><span><CircleHelp size={16} /></span><b>Need a hand?</b><small>Our team is here to help you.</small><button onClick={() => setDialog("Contact support")}>Get support <ArrowRight size={12} /></button></div>
           <button className="sidebar-link logout-link" onClick={() => openDialog("Log out of your account?")}><LogOut size={17} /><span>Log out</span></button>
-          <div className="sidebar-user"><span className="user-avatar">{initials(fullName || (role === "buyer" ? "Alex Morgan" : "Samira Rahman"))}</span><span><b>{fullName}</b><small>{role === "buyer" ? "Brand account" : "Factory administrator"}</small></span><MoreHorizontal size={17} /></div>
+          <div className="sidebar-user">
+            <span className="user-avatar">
+              {buyerAvatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={buyerAvatarUrl} alt={displayName} className="user-avatar-img" />
+              ) : (
+                initials(displayName || (role === "buyer" ? "Alex Morgan" : "Samira Rahman"))
+              )}
+            </span>
+            <span><b>{displayName}</b><small>{role === "buyer" ? buyerProfile?.buyerType || "Brand account" : "Factory administrator"}</small></span>
+            <MoreHorizontal size={17} />
+          </div>
         </div>
       </aside>
       <div className="workspace-main">
         <header className="workspace-topbar">
           <button className="mobile-menu" aria-label="Open menu" onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
           <div className="breadcrumbs"><span>{role === "buyer" ? "Buyer" : "Factory"}</span><span>/</span><strong>{activePage}</strong></div>
-          <div className="topbar-actions"><label className="top-search"><Search size={15} /><input placeholder="Search anything..." /><kbd>⌘ K</kbd></label><button className={`topbar-icon ${notificationOpen ? "topbar-icon-active" : ""}`} aria-label="Notifications" onClick={() => setNotificationOpen((current) => !current)}><Bell size={18} /><i /></button><span className="topbar-divider" /><button className="topbar-user" onClick={() => setDialog("Account profile")}><span className="user-avatar">{initials(fullName || "Alex Morgan")}</span><ChevronDown size={14} /></button></div>
+          <div className="topbar-actions">
+            <label className="top-search"><Search size={15} /><input placeholder="Search anything..." /><kbd>⌘ K</kbd></label>
+            <button className={`topbar-icon ${notificationOpen ? "topbar-icon-active" : ""}`} aria-label="Notifications" onClick={() => setNotificationOpen((current) => !current)}><Bell size={18} /><i /></button>
+            <span className="topbar-divider" />
+            <button className="topbar-user" onClick={() => role === "buyer" ? navigate("Settings") : setDialog("Account profile")}>
+              <span className="user-avatar">
+                {buyerAvatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={buyerAvatarUrl} alt={displayName} className="user-avatar-img" />
+                ) : (
+                  initials(displayName || "Alex Morgan")
+                )}
+              </span>
+              <ChevronDown size={14} />
+            </button>
+          </div>
           {notificationOpen && <div className="notification-popover"><div><strong>Notifications</strong><button onClick={() => setNotificationOpen(false)}><X size={14} /></button></div><p><span className="notification-dot" /><span><b>{role === "buyer" ? "New quotation received" : "New matching request"}</b><small>{role === "buyer" ? "Evergreen Apparel sent a quote · 12 min ago" : "Crewneck tee request matches your profile · 12 min ago"}</small></span></p><p><span className="notification-dot muted-dot" /><span><b>Order update</b><small>Production milestone completed · 2 hours ago</small></span></p><button className="notification-all" onClick={() => { setNotificationOpen(false); navigate("Messages"); }}>View all updates</button></div>}
         </header>
         <main className="workspace-content" key={activePage}>{pageContent()}</main>

@@ -1,15 +1,21 @@
 import {
+  EmailAuthProvider,
   browserLocalPersistence,
-  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  deleteUser,
   onAuthStateChanged,
+  reauthenticateWithCredential,
+  sendPasswordResetEmail,
   setPersistence,
+  signInWithEmailAndPassword,
   signOut as firebaseSignOut,
+  updatePassword,
+  updateProfile,
   type User as FirebaseAuthUser,
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { deleteDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import type { User, Role } from '@/types/user';
+import type { BuyerTheme, Role, User } from '@/types/user';
 
 export interface AccountRecord {
   id?: string;
@@ -24,6 +30,8 @@ export interface AccountRecord {
   country?: string;
   city?: string;
   website?: string;
+  photoURL?: string;
+  theme?: BuyerTheme;
   monthlyCapacity?: number;
   moq?: number;
   processes?: string[];
@@ -44,6 +52,10 @@ function normalizeRole(value: unknown): Role | null {
   if (typeof value !== 'string') return null;
   const normalized = value.trim().toUpperCase();
   return isRole(normalized) ? normalized : null;
+}
+
+export function normalizeBuyerTheme(value: unknown): BuyerTheme {
+  return value === 'dark' || value === 'light' || value === 'default' ? value : 'default';
 }
 
 export function saveCurrentUser(user: User): void {
@@ -85,14 +97,22 @@ export async function restoreUserFromFirebase(): Promise<User | null> {
     console.error('[Auth] Could not restore the cloud profile; using the registered local account:', error);
   }
 
+  if (userProfile.isActive === false) return null;
+
   const role = normalizeRole(userProfile.role) ?? normalizeRole(account?.role);
   if (!isRole(role)) return null;
+
+  const photoURL =
+    account?.photoURL ||
+    (typeof userProfile.photoURL === 'string' ? userProfile.photoURL : undefined);
 
   const user: User = {
     id: firebaseUser.uid,
     email,
     fullName: account?.fullName || (typeof userProfile.fullName === 'string' ? userProfile.fullName : '') || email.split('@')[0],
     role,
+    ...(photoURL ? { photoURL } : {}),
+    ...(account?.theme ? { theme: account.theme } : {}),
     ...(role === 'ADMIN' ? { adminRole: 'SUPER_ADMIN' as const } : {}),
   };
   saveCurrentUser(user);
@@ -157,6 +177,35 @@ export function saveRegisteredAccount(account: AccountRecord): void {
   } catch (err) {
     console.error('Failed to save user account:', err);
     throw err;
+  }
+}
+
+/**
+ * Remove a registered account from local persistence by email or username
+ */
+export function removeRegisteredAccount(identifier: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const current = getRegisteredAccounts();
+    const clean = identifier.trim().toLowerCase();
+    const matched = findAccount(clean);
+    const targetEmail = matched?.email?.toLowerCase() || clean;
+    const targetUsername = matched?.username?.toLowerCase();
+
+    for (const [key, acc] of Object.entries(current)) {
+      if (
+        key.toLowerCase() === clean ||
+        key.toLowerCase() === targetEmail ||
+        (targetUsername && key.toLowerCase() === targetUsername) ||
+        acc.email.toLowerCase() === targetEmail
+      ) {
+        delete current[key];
+      }
+    }
+
+    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(current));
+  } catch (err) {
+    console.error('Failed to remove local user account:', err);
   }
 }
 
@@ -302,20 +351,39 @@ export async function login(identifier: string, password: string): Promise<User>
 
   // 1. Check registered account
   if (matched) {
+    let resolvedMatched = matched;
+
     if (matched.password !== password) {
-      throw new Error('The password you entered is incorrect.');
+      // Allow Firebase Auth check in case the user reset their password via reset email
+      let verifiedWithFirebase = false;
+      if (matched.email.includes('@')) {
+        try {
+          await setPersistence(auth, browserLocalPersistence);
+          await signInWithEmailAndPassword(auth, matched.email, password);
+          resolvedMatched = { ...matched, password };
+          saveRegisteredAccount(resolvedMatched);
+          verifiedWithFirebase = true;
+        } catch {
+          verifiedWithFirebase = false;
+        }
+      }
+      if (!verifiedWithFirebase) {
+        throw new Error('The password you entered is incorrect.');
+      }
     }
 
-    const role = normalizeRole(matched.role);
+    const role = normalizeRole(resolvedMatched.role);
     if (!role) throw new Error('This account has an invalid role. Contact support for help.');
 
-    const userId = matched.id || `local:${matched.email.trim().toLowerCase()}`;
+    const userId = resolvedMatched.id || `local:${resolvedMatched.email.trim().toLowerCase()}`;
 
     const user: User = {
       id: userId,
-      email: matched.email,
-      fullName: matched.fullName,
+      email: resolvedMatched.email,
+      fullName: resolvedMatched.fullName,
       role,
+      ...(resolvedMatched.photoURL ? { photoURL: resolvedMatched.photoURL } : {}),
+      ...(resolvedMatched.theme ? { theme: resolvedMatched.theme } : {}),
       ...(role === 'ADMIN' ? { adminRole: 'SUPER_ADMIN' as const } : {}),
     };
 
@@ -323,7 +391,9 @@ export async function login(identifier: string, password: string): Promise<User>
 
     try {
       await setPersistence(auth, browserLocalPersistence);
-      await signInWithEmailAndPassword(auth, matched.email, password);
+      if (auth.currentUser?.email?.toLowerCase() !== resolvedMatched.email.toLowerCase()) {
+        await signInWithEmailAndPassword(auth, resolvedMatched.email, password);
+      }
     } catch (error) {
       console.warn('[Firebase Auth] Could not persist local-account sign-in; retaining the local session:', error);
     }
@@ -346,34 +416,252 @@ export async function login(identifier: string, password: string): Promise<User>
         const userDoc = await getDoc(doc(db, 'users', firebaseUid));
         if (userDoc.exists()) {
           const data = userDoc.data();
+          if (data.isActive === false) {
+            await firebaseSignOut(auth).catch(() => {});
+            throw new Error('This account has been deleted. Please create a new account.');
+          }
           const user: User = {
             id: firebaseUid,
             email: clean,
             fullName: data.fullName || clean.split('@')[0],
             role: normalizeRole(data.role) ?? 'BUYER',
+            ...(typeof data.photoURL === 'string' && data.photoURL ? { photoURL: data.photoURL } : {}),
           };
           saveCurrentUser(user);
           return user;
         }
-      } catch {
-        // Fallback to minimal user
+      } catch (docError) {
+        if (docError instanceof Error && docError.message.includes('deleted')) {
+          throw docError;
+        }
       }
 
       const user: User = {
         id: firebaseUid,
         email: clean,
-        fullName: clean.split('@')[0],
+        fullName: userCredential.user.displayName || clean.split('@')[0],
         role: 'BUYER',
       };
       saveCurrentUser(user);
       return user;
     } catch (firebaseError: unknown) {
+      if (firebaseError instanceof Error && firebaseError.message.includes('deleted')) {
+        throw firebaseError;
+      }
       console.warn('[Firebase Auth Error]:', firebaseError);
     }
   }
 
   // If no account matches, reject authentication (no demo accounts, no auto-register)
   throw new Error('The username/email or password you entered is incorrect. Please register first if you do not have an account.');
+}
+
+function getFirebaseErrorCode(error: unknown): string {
+  return typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code: unknown }).code === 'string'
+    ? (error as { code: string }).code
+    : '';
+}
+
+export async function updateBuyerAuthDisplayName(fullName: string): Promise<void> {
+  const currentUser = auth.currentUser;
+  if (!currentUser || !fullName.trim()) return;
+  try {
+    await updateProfile(currentUser, { displayName: fullName.trim() });
+  } catch (error) {
+    console.warn('[Firebase Auth] Could not update displayName:', error);
+  }
+}
+
+export async function changeUserPassword(
+  email: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<string> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!currentPassword) {
+    throw new Error('Please enter your current password.');
+  }
+  if (newPassword.length < 6) {
+    throw new Error('New password must be at least 6 characters long.');
+  }
+  if (currentPassword === newPassword) {
+    throw new Error('New password must be different from your current password.');
+  }
+
+  const localAccount = findAccount(cleanEmail);
+  const firebaseUser = auth.currentUser;
+  const matchingFirebaseUser =
+    firebaseUser && firebaseUser.email?.toLowerCase() === cleanEmail ? firebaseUser : null;
+
+  let firebaseUpdated = false;
+  if (matchingFirebaseUser) {
+    try {
+      const credential = EmailAuthProvider.credential(cleanEmail, currentPassword);
+      await reauthenticateWithCredential(matchingFirebaseUser, credential);
+      await updatePassword(matchingFirebaseUser, newPassword);
+      firebaseUpdated = true;
+    } catch (error) {
+      const code = getFirebaseErrorCode(error);
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        throw new Error('Your current password is incorrect.');
+      }
+      if (code === 'auth/weak-password') {
+        throw new Error('Please choose a stronger password (at least 6 characters).');
+      }
+      if (code === 'auth/too-many-requests') {
+        throw new Error('Too many attempts. Please wait a moment and try again.');
+      }
+      if (code === 'auth/requires-recent-login') {
+        throw new Error('Please sign out and sign back in before changing your password.');
+      }
+      if (code !== 'auth/network-request-failed' || !localAccount) {
+        throw new Error(error instanceof Error ? error.message : 'Unable to update your password in Firebase.');
+      }
+    }
+  } else if (localAccount) {
+    if (localAccount.password !== currentPassword) {
+      throw new Error('Your current password is incorrect.');
+    }
+    if (cleanEmail.includes('@')) {
+      try {
+        const cred = await signInWithEmailAndPassword(auth, cleanEmail, currentPassword);
+        await updatePassword(cred.user, newPassword);
+        firebaseUpdated = true;
+      } catch (error) {
+        const code = getFirebaseErrorCode(error);
+        if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+          throw new Error('Your current password is incorrect.');
+        }
+      }
+    }
+  } else {
+    throw new Error('Your active sign-in session could not be verified. Please sign in again.');
+  }
+
+  if (localAccount) {
+    saveRegisteredAccount({ ...localAccount, password: newPassword });
+  }
+
+  return firebaseUpdated
+    ? 'Password updated in Firebase Authentication and synced to your account.'
+    : 'Password updated for your local buyer account.';
+}
+
+export async function sendUserPasswordReset(email: string): Promise<string> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) {
+    throw new Error('A valid email address is required to send a password reset link.');
+  }
+
+  try {
+    await sendPasswordResetEmail(auth, cleanEmail);
+    return `Password reset email sent to ${cleanEmail}. Check your inbox (and spam folder) for the link.`;
+  } catch (error) {
+    const code = getFirebaseErrorCode(error);
+    if (code === 'auth/user-not-found') {
+      throw new Error(`No Firebase Authentication user was found for ${cleanEmail}. Ensure Email/Password auth is enabled and the account is registered online.`);
+    }
+    if (code === 'auth/invalid-email') {
+      throw new Error('The account email address is invalid.');
+    }
+    if (code === 'auth/too-many-requests') {
+      throw new Error('Too many password reset requests. Please wait a few minutes before trying again.');
+    }
+    if (code === 'auth/configuration-not-found') {
+      throw new Error('Firebase Email/Password authentication is not yet enabled for this Firebase project.');
+    }
+    throw new Error(error instanceof Error ? error.message : 'Could not send password reset email.');
+  }
+}
+
+export async function deleteUserAccount(email: string, password: string): Promise<void> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!password) {
+    throw new Error('Please enter your password to confirm account deletion.');
+  }
+
+  const localAccount = findAccount(cleanEmail);
+  let firebaseUser =
+    auth.currentUser && auth.currentUser.email?.toLowerCase() === cleanEmail
+      ? auth.currentUser
+      : null;
+
+  if (!firebaseUser && cleanEmail.includes('@')) {
+    try {
+      const signedIn = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      firebaseUser = signedIn.user;
+    } catch (error) {
+      const code = getFirebaseErrorCode(error);
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        throw new Error('The password you entered is incorrect.');
+      }
+    }
+  }
+
+  if (firebaseUser) {
+    try {
+      const credential = EmailAuthProvider.credential(cleanEmail, password);
+      await reauthenticateWithCredential(firebaseUser, credential);
+    } catch (error) {
+      const code = getFirebaseErrorCode(error);
+      if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        throw new Error('The password you entered is incorrect.');
+      }
+      if (code === 'auth/too-many-requests') {
+        throw new Error('Too many failed attempts. Please wait a moment and try again.');
+      }
+      if (code !== 'auth/network-request-failed') {
+        throw new Error(error instanceof Error ? error.message : 'Could not verify your password before deleting.');
+      }
+    }
+
+    const now = new Date().toISOString();
+    try {
+      await deleteDoc(doc(db, 'buyers', firebaseUser.uid));
+    } catch (err) {
+      console.warn('[Account Delete] Could not delete buyers doc:', err);
+    }
+    try {
+      await setDoc(
+        doc(db, 'users', firebaseUser.uid),
+        {
+          isActive: false,
+          fullName: 'Deleted User',
+          phoneNumber: '',
+          photoURL: '',
+          deletedAt: now,
+          updatedAt: now,
+        },
+        { merge: true },
+      );
+    } catch (err) {
+      console.warn('[Account Delete] Could not mark users doc inactive:', err);
+    }
+
+    try {
+      await deleteUser(firebaseUser);
+    } catch (error) {
+      const code = getFirebaseErrorCode(error);
+      if (code === 'auth/requires-recent-login') {
+        throw new Error('Please sign out, sign back in, and retry deleting your account.');
+      }
+      throw new Error(error instanceof Error ? error.message : 'Failed to delete your Firebase user account.');
+    }
+  } else if (localAccount) {
+    if (localAccount.password !== password) {
+      throw new Error('The password you entered is incorrect.');
+    }
+  } else {
+    throw new Error('Account session not found. Please sign in again.');
+  }
+
+  removeRegisteredAccount(cleanEmail);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(`techgarments_buyer_theme_${cleanEmail}`);
+    localStorage.removeItem(`techgarments_saved_factories_${cleanEmail}`);
+    localStorage.removeItem(`techgarments_buyer_notifications_${cleanEmail}`);
+  }
+  logout();
 }
 
 export function logout(): void {

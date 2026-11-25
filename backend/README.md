@@ -2,9 +2,9 @@
 
 Robust RESTful API and Cloud Firestore backend service for the **TechGarments** apparel manufacturing platform.
 
-- **Firebase Project ID**: `techgarments-a41d6`
-- **Firebase Console**: [https://console.firebase.google.com/project/techgarments-a41d6/overview](https://console.firebase.google.com/project/techgarments-a41d6/overview)
-- **Cloud Firestore**: [https://console.firebase.google.com/project/techgarments-a41d6/firestore](https://console.firebase.google.com/project/techgarments-a41d6/firestore)
+- **Firebase Project ID**: `techgarments-cdd93`
+- **Firebase Console**: [https://console.firebase.google.com/project/techgarments-cdd93/overview](https://console.firebase.google.com/project/techgarments-cdd93/overview)
+- **Cloud Firestore**: [https://console.firebase.google.com/project/techgarments-cdd93/firestore](https://console.firebase.google.com/project/techgarments-cdd93/firestore)
 
 ---
 
@@ -70,11 +70,11 @@ TechGarments/
 
 ## 🔑 Firebase & Cloud Firestore Setup
 
-The backend connects directly to your Firebase project: `techgarments-a41d6`.
+The backend connects directly to your Firebase project: `techgarments-cdd93`.
 
 ### 1. Download Your Firebase Admin Service Account Key
 
-1. Go to your Firebase Console: [Service Accounts Settings](https://console.firebase.google.com/project/techgarments-a41d6/settings/serviceaccounts/adminsdk)
+1. Go to your Firebase Console: [Service Accounts Settings](https://console.firebase.google.com/project/techgarments-cdd93/settings/serviceaccounts/adminsdk)
 2. Ensure **Node.js** is selected.
 3. Click the blue button **"Generate new private key"**.
 4. Save the downloaded file into the `backend/` directory and rename it to:
@@ -85,7 +85,7 @@ The backend connects directly to your Firebase project: `techgarments-a41d6`.
 
 ### 2. Verify Cloud Firestore is Enabled
 
-1. Open [Firestore Database Console](https://console.firebase.google.com/project/techgarments-a41d6/firestore).
+1. Open [Firestore Database Console](https://console.firebase.google.com/project/techgarments-cdd93/firestore).
 2. If prompted, click **"Create database"** with default location and start in production/test mode.
 
 ---

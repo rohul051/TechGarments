@@ -31,13 +31,16 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const registeredParam = searchParams.get("registered");
+  const deletedParam = searchParams.get("deleted");
   const identifierParam = searchParams.get("identifier") || searchParams.get("email");
 
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(() =>
     registeredParam === "true"
       ? "Account created successfully! Please sign in with your username/gmail and password."
-      : null,
+      : deletedParam === "true"
+        ? "Your buyer account has been permanently deleted."
+        : null,
   );
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);

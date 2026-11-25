@@ -1,5 +1,7 @@
 export type Role = 'BUYER' | 'FACTORY' | 'ADMIN';
 
+export type BuyerTheme = 'default' | 'light' | 'dark';
+
 export type AdminRole =
   | 'SUPER_ADMIN'
   | 'VERIFICATION_ADMIN'
@@ -13,6 +15,20 @@ export interface User {
   fullName: string;
   role: Role;
   adminRole?: AdminRole;
+  photoURL?: string;
+  theme?: BuyerTheme;
+}
+
+export interface BuyerProfileDetails {
+  fullName: string;
+  email: string;
+  phone: string;
+  companyName: string;
+  buyerType: string;
+  country: string;
+  website: string;
+  photoURL?: string;
+  theme?: BuyerTheme;
 }
 
 export interface FactoryProfileDetails {

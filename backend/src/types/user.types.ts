@@ -21,6 +21,8 @@ export interface BuyerProfile {
   buyerType: 'Clothing Brand' | 'Retailer' | 'Wholesaler' | 'Importer / Exporter' | 'Individual / Startup' | string;
   country: string;
   website?: string;
+  photoURL?: string;
+  theme?: 'default' | 'light' | 'dark';
   createdAt: string;
   updatedAt: string;
 }

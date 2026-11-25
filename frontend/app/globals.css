@@ -6797,3 +6797,1015 @@ a {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+
+/* ============================================================
+   Buyer Profile Avatar, Settings & Scoped Buyer Themes
+   ============================================================ */
+
+.user-avatar {
+  overflow: hidden;
+}
+
+.user-avatar-img,
+.buyer-logo-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.factory-logo.buyer-logo {
+  overflow: hidden;
+}
+
+.buyer-profile-link {
+  color: #168a83;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.buyer-settings-stack {
+  display: grid;
+  gap: 18px;
+  padding-bottom: 24px;
+}
+
+.buyer-settings-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.buyer-settings-nav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 13px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #405869;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: border-color 140ms ease, color 140ms ease, background 140ms ease;
+}
+
+.buyer-settings-nav a:hover {
+  border-color: #168a83;
+  color: #168a83;
+  background: #f2faf7;
+}
+
+.buyer-settings-panel {
+  padding: 22px;
+}
+
+.buyer-settings-panel-header {
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #edf1f0;
+}
+
+.buyer-settings-panel-header h3 {
+  margin: 6px 0 4px;
+  color: #1b3447;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.buyer-settings-panel-header p {
+  margin: 0;
+  color: #7c8d95;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.buyer-avatar-editor {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 16px;
+  margin-bottom: 20px;
+  border: 1px solid #e6ecea;
+  border-radius: 10px;
+  background: #f9fbfb;
+}
+
+.buyer-avatar-preview {
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #d5e9e3;
+  border-radius: 50%;
+  background: #e5f1ed;
+  color: #2d7367;
+  font-size: 22px;
+  font-weight: 750;
+}
+
+.buyer-avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.buyer-avatar-controls h4 {
+  margin: 0;
+  color: #2b4659;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.buyer-avatar-controls p {
+  margin: 4px 0 11px;
+  color: #7d8e96;
+  font-size: 13px;
+}
+
+.buyer-avatar-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.buyer-settings-form .workspace-field {
+  margin-bottom: 0;
+}
+
+.buyer-input-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.buyer-input-icon > svg {
+  position: absolute;
+  left: 11px;
+  color: #8b9ba1;
+  pointer-events: none;
+}
+
+.buyer-input-icon input {
+  padding-left: 34px;
+}
+
+.buyer-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #edf1f0;
+}
+
+.buyer-readonly-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #72858e;
+  font-size: 13px;
+}
+
+.buyer-readonly-note strong {
+  color: #3a5262;
+}
+
+.buyer-settings-form .profile-edit-error,
+.buyer-settings-form .profile-save-message {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
+.buyer-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.buyer-theme-card {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  padding: 12px;
+  border: 1.5px solid #e4eae8;
+  border-radius: 11px;
+  background: #ffffff;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+
+.buyer-theme-card:hover {
+  transform: translateY(-1px);
+  border-color: #9ed0c5;
+}
+
+.buyer-theme-card.theme-card-active {
+  border-color: #168a83;
+  box-shadow: 0 0 0 3px rgba(22, 138, 131, 0.12);
+}
+
+.buyer-theme-swatch {
+  height: 76px;
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 7px;
+  padding: 8px;
+  border-radius: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  margin-bottom: 11px;
+}
+
+.swatch-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px 5px;
+  border-radius: 4px;
+}
+
+.swatch-sidebar span {
+  height: 5px;
+  border-radius: 3px;
+}
+
+.swatch-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.swatch-topbar {
+  height: 11px;
+  border-radius: 4px;
+}
+
+.swatch-cards {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.swatch-cards span {
+  border-radius: 4px;
+}
+
+.buyer-theme-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.buyer-theme-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.buyer-theme-title-row > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #264255;
+  font-size: 14px;
+}
+
+.buyer-theme-meta small {
+  color: #7c8d95;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.theme-active-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 7px;
+  border-radius: 20px;
+  background: #eaf5f1;
+  color: #168a83;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.buyer-theme-feedback {
+  margin-top: 14px;
+  margin-bottom: 0;
+}
+
+.buyer-account-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.buyer-account-actions-col {
+  display: grid;
+  gap: 14px;
+}
+
+.buyer-account-subcard {
+  padding: 16px;
+  border: 1px solid #e6ecea;
+  border-radius: 10px;
+  background: #fbfcfc;
+}
+
+.subcard-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-bottom: 14px;
+}
+
+.subcard-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: #e9f5f1;
+  color: #168a83;
+}
+
+.subcard-icon.warning-icon {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.subcard-icon.danger-icon {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.subcard-title h4 {
+  margin: 0;
+  color: #284356;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.subcard-title p {
+  margin: 4px 0 0;
+  color: #748790;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.buyer-password-form {
+  display: grid;
+  gap: 13px;
+}
+
+.buyer-password-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.buyer-password-wrap input {
+  padding-right: 36px;
+}
+
+.buyer-password-wrap button {
+  position: absolute;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #82939a;
+  cursor: pointer;
+}
+
+.buyer-password-wrap button:hover {
+  color: #168a83;
+}
+
+.buyer-warning-card {
+  border-color: #f3dfb8;
+  background: #fffcf5;
+}
+
+.buyer-danger-card {
+  border-color: #f5c9c9;
+  background: #fff9f9;
+}
+
+.buyer-warning-button,
+.buyer-danger-button {
+  width: 100%;
+  min-height: 35px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.buyer-warning-button {
+  border: 1px solid #e7c27c;
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.buyer-warning-button:hover {
+  background: #fef3c7;
+}
+
+.buyer-danger-button {
+  border: 1px solid #f0b1b1;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.buyer-danger-button:hover {
+  background: #fee2e2;
+}
+
+.buyer-warning-solid-button,
+.buyer-danger-solid-button {
+  min-height: 35px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 7px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.buyer-warning-solid-button {
+  background: #d97706;
+}
+
+.buyer-warning-solid-button:hover:not(:disabled) {
+  background: #b45309;
+}
+
+.buyer-danger-solid-button {
+  background: #dc2626;
+}
+
+.buyer-danger-solid-button:hover:not(:disabled) {
+  background: #b91c1c;
+}
+
+.buyer-warning-solid-button:disabled,
+.buyer-danger-solid-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.modal-icon-warning {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.modal-icon-danger {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.buyer-delete-confirm-form {
+  display: grid;
+  gap: 13px;
+  margin-top: 15px;
+  text-align: left;
+}
+
+@media (max-width: 900px) {
+  .buyer-theme-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .buyer-account-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 600px) {
+  .buyer-avatar-editor {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* ============================================================
+   Scoped Buyer Theme Overrides (Light & Dark, Buyer Side Only)
+   ============================================================ */
+
+/* ── Light Theme (Crisp Daylight Navy + Emerald Accent) ── */
+.buyer-workspace.buyer-theme-light {
+  background: #eef2f6;
+  color: #0f172a;
+}
+
+.buyer-workspace.buyer-theme-light .workspace-sidebar {
+  background: #ffffff;
+  border-right-color: #dbe3ec;
+}
+
+.buyer-workspace.buyer-theme-light .workspace-topbar {
+  background: rgba(255, 255, 255, 0.96);
+  border-bottom-color: #dbe3ec;
+}
+
+.buyer-workspace.buyer-theme-light .workspace-brand,
+.buyer-workspace.buyer-theme-light .welcome-row h1,
+.buyer-workspace.buyer-theme-light .workspace-section-heading h2,
+.buyer-workspace.buyer-theme-light .stat-value-line strong,
+.buyer-workspace.buyer-theme-light .buyer-settings-panel-header h3 {
+  color: #102b46;
+}
+
+.buyer-workspace.buyer-theme-light .workspace-eyebrow,
+.buyer-workspace.buyer-theme-light .workspace-text-action,
+.buyer-workspace.buyer-theme-light .sidebar-link-active,
+.buyer-workspace.buyer-theme-light .sidebar-link-active > svg,
+.buyer-workspace.buyer-theme-light .workspace-brand > span:last-child > span,
+.buyer-workspace.buyer-theme-light .buyer-profile-link {
+  color: #16a36a;
+}
+
+.buyer-workspace.buyer-theme-light .workspace-brand-icon,
+.buyer-workspace.buyer-theme-light .sidebar-link-active,
+.buyer-workspace.buyer-theme-light .theme-active-badge {
+  background: #ecfdf5;
+  color: #16a36a;
+}
+
+.buyer-workspace.buyer-theme-light .sidebar-link-active::before,
+.buyer-workspace.buyer-theme-light .workspace-primary-button,
+.buyer-workspace.buyer-theme-light .table-action-primary,
+.buyer-workspace.buyer-theme-light .progress-track > span,
+.buyer-workspace.buyer-theme-light .notification-dot {
+  background: #16a36a;
+  border-color: #16a36a;
+}
+
+.buyer-workspace.buyer-theme-light .workspace-primary-button:hover:not(:disabled) {
+  background: #128758;
+  border-color: #128758;
+}
+
+.buyer-workspace.buyer-theme-light .buyer-theme-card.theme-card-active {
+  border-color: #16a36a;
+  box-shadow: 0 0 0 3px rgba(22, 163, 106, 0.14);
+}
+
+.buyer-workspace.buyer-theme-light .workspace-panel,
+.buyer-workspace.buyer-theme-light .workspace-stat-card,
+.buyer-workspace.buyer-theme-light .factory-card,
+.buyer-workspace.buyer-theme-light .market-search-panel,
+.buyer-workspace.buyer-theme-light .buyer-theme-card,
+.buyer-workspace.buyer-theme-light .workspace-footer {
+  background: #ffffff;
+  border-color: #dce4ee;
+  box-shadow: 0 2px 10px rgba(16, 43, 70, 0.04);
+}
+
+/* ── Dark Theme (Midnight Navy & Slate Dark UI) ── */
+.buyer-workspace.buyer-theme-dark {
+  --dash-ink: #e2e8f0;
+  --dash-muted: #94a3b8;
+  --dash-line: #233548;
+  --dash-teal: #2dd4bf;
+  --dash-teal-dark: #14b8a6;
+  background: #0b1622;
+  color: #e2e8f0;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-sidebar {
+  background: #111f2e;
+  border-right-color: #1f3246;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-brand,
+.buyer-workspace.buyer-theme-dark .welcome-row h1,
+.buyer-workspace.buyer-theme-dark .workspace-section-heading h2,
+.buyer-workspace.buyer-theme-dark .stat-value-line strong,
+.buyer-workspace.buyer-theme-dark .factory-card-title h3,
+.buyer-workspace.buyer-theme-dark .table-main,
+.buyer-workspace.buyer-theme-dark .quote-info strong,
+.buyer-workspace.buyer-theme-dark .mini-order > strong,
+.buyer-workspace.buyer-theme-dark .market-results-line strong,
+.buyer-workspace.buyer-theme-dark .workspace-switch b,
+.buyer-workspace.buyer-theme-dark .sidebar-user b,
+.buyer-workspace.buyer-theme-dark .breadcrumbs strong,
+.buyer-workspace.buyer-theme-dark .help-card b,
+.buyer-workspace.buyer-theme-dark .company-profile-name,
+.buyer-workspace.buyer-theme-dark .buyer-settings-panel-header h3,
+.buyer-workspace.buyer-theme-dark .buyer-avatar-controls h4,
+.buyer-workspace.buyer-theme-dark .subcard-title h4,
+.buyer-workspace.buyer-theme-dark .buyer-theme-title-row > span:first-child,
+.buyer-workspace.buyer-theme-dark .workspace-modal h2,
+.buyer-workspace.buyer-theme-dark .buyer-readonly-note strong,
+.buyer-workspace.buyer-theme-dark .profile-detail-list > b,
+.buyer-workspace.buyer-theme-dark .contact-detail > span b,
+.buyer-workspace.buyer-theme-dark .request-form-section h3,
+.buyer-workspace.buyer-theme-dark .factory-profile-modal-details dd,
+.buyer-workspace.buyer-theme-dark .request-detail-grid b,
+.buyer-workspace.buyer-theme-dark .workspace-empty h2 {
+  color: #f1f5f9;
+}
+
+.buyer-workspace.buyer-theme-dark .welcome-row p,
+.buyer-workspace.buyer-theme-dark .workspace-section-heading p,
+.buyer-workspace.buyer-theme-dark .stat-label,
+.buyer-workspace.buyer-theme-dark .stat-change,
+.buyer-workspace.buyer-theme-dark .factory-card-title p,
+.buyer-workspace.buyer-theme-dark .factory-card-meta,
+.buyer-workspace.buyer-theme-dark .table-sub,
+.buyer-workspace.buyer-theme-dark .workspace-table td,
+.buyer-workspace.buyer-theme-dark .workspace-table th,
+.buyer-workspace.buyer-theme-dark .quote-info > span,
+.buyer-workspace.buyer-theme-dark .quote-info > div,
+.buyer-workspace.buyer-theme-dark .mini-order > span,
+.buyer-workspace.buyer-theme-dark .order-id,
+.buyer-workspace.buyer-theme-dark .workspace-switch small,
+.buyer-workspace.buyer-theme-dark .sidebar-label,
+.buyer-workspace.buyer-theme-dark .sidebar-user small,
+.buyer-workspace.buyer-theme-dark .breadcrumbs,
+.buyer-workspace.buyer-theme-dark .help-card small,
+.buyer-workspace.buyer-theme-dark .profile-description,
+.buyer-workspace.buyer-theme-dark .profile-detail-list > span,
+.buyer-workspace.buyer-theme-dark .contact-detail > span small,
+.buyer-workspace.buyer-theme-dark .buyer-settings-panel-header p,
+.buyer-workspace.buyer-theme-dark .buyer-avatar-controls p,
+.buyer-workspace.buyer-theme-dark .subcard-title p,
+.buyer-workspace.buyer-theme-dark .buyer-theme-meta small,
+.buyer-workspace.buyer-theme-dark .buyer-readonly-note,
+.buyer-workspace.buyer-theme-dark .workspace-modal > p,
+.buyer-workspace.buyer-theme-dark .market-results-line,
+.buyer-workspace.buyer-theme-dark .market-results-line label,
+.buyer-workspace.buyer-theme-dark .workspace-footer,
+.buyer-workspace.buyer-theme-dark .request-form-section p,
+.buyer-workspace.buyer-theme-dark .request-form-footer > span,
+.buyer-workspace.buyer-theme-dark .factory-directory-notice,
+.buyer-workspace.buyer-theme-dark .factory-profile-modal-details dt,
+.buyer-workspace.buyer-theme-dark .workspace-empty p {
+  color: #94a3b8;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-eyebrow,
+.buyer-workspace.buyer-theme-dark .workspace-text-action,
+.buyer-workspace.buyer-theme-dark .workspace-brand > span:last-child > span,
+.buyer-workspace.buyer-theme-dark .change-up,
+.buyer-workspace.buyer-theme-dark .progress-info b,
+.buyer-workspace.buyer-theme-dark .buyer-profile-link {
+  color: #2dd4bf;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-topbar {
+  background: rgba(17, 31, 46, 0.94);
+  border-bottom-color: #1f3246;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-footer {
+  background: #111f2e;
+  border-top-color: #1f3246;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-panel,
+.buyer-workspace.buyer-theme-dark .workspace-stat-card,
+.buyer-workspace.buyer-theme-dark .factory-card,
+.buyer-workspace.buyer-theme-dark .market-search-panel,
+.buyer-workspace.buyer-theme-dark .buyer-theme-card,
+.buyer-workspace.buyer-theme-dark .workspace-modal,
+.buyer-workspace.buyer-theme-dark .notification-popover,
+.buyer-workspace.buyer-theme-dark .workspace-empty {
+  background: #132334;
+  border-color: #23364b;
+  box-shadow: 0 8px 24px rgba(2, 8, 16, 0.35);
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-switch,
+.buyer-workspace.buyer-theme-dark .help-card,
+.buyer-workspace.buyer-theme-dark .buyer-avatar-editor,
+.buyer-workspace.buyer-theme-dark .buyer-account-subcard,
+.buyer-workspace.buyer-theme-dark .mini-order,
+.buyer-workspace.buyer-theme-dark .request-detail-grid > span,
+.buyer-workspace.buyer-theme-dark .request-file-item,
+.buyer-workspace.buyer-theme-dark .conversation-preview {
+  background: #182b3f;
+  border-color: #263c53;
+}
+
+.buyer-workspace.buyer-theme-dark .conversation-list {
+  border-right-color: #23364b;
+}
+
+.buyer-workspace.buyer-theme-dark .conversation-preview:hover,
+.buyer-workspace.buyer-theme-dark .conversation-selected {
+  background: #1d354d;
+}
+
+.buyer-workspace.buyer-theme-dark .conversation-preview b,
+.buyer-workspace.buyer-theme-dark .thread-header b,
+.buyer-workspace.buyer-theme-dark .message-bubble {
+  color: #e2e8f0;
+}
+
+.buyer-workspace.buyer-theme-dark .message-bubble.received {
+  background: #182b3f;
+  border-color: #263c53;
+}
+
+.buyer-workspace.buyer-theme-dark .message-bubble.sent {
+  background: #134e4a;
+  color: #ccfbf1;
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-warning-card {
+  background: rgba(180, 83, 9, 0.14);
+  border-color: rgba(217, 119, 6, 0.38);
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-danger-card {
+  background: rgba(185, 28, 28, 0.15);
+  border-color: rgba(239, 68, 68, 0.38);
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-warning-button {
+  background: rgba(217, 119, 6, 0.18);
+  border-color: rgba(245, 158, 11, 0.45);
+  color: #fcd34d;
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-warning-button:hover {
+  background: rgba(217, 119, 6, 0.3);
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-danger-button {
+  background: rgba(220, 38, 38, 0.2);
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fca5a5;
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-danger-button:hover {
+  background: rgba(220, 38, 38, 0.32);
+}
+
+.buyer-workspace.buyer-theme-dark .sidebar-link {
+  color: #94a3b8;
+}
+
+.buyer-workspace.buyer-theme-dark .sidebar-link > svg {
+  color: #64748b;
+}
+
+.buyer-workspace.buyer-theme-dark .sidebar-link:hover {
+  background: #182b3f;
+  color: #f1f5f9;
+}
+
+.buyer-workspace.buyer-theme-dark .sidebar-link-active {
+  background: rgba(45, 212, 191, 0.14);
+  color: #2dd4bf;
+}
+
+.buyer-workspace.buyer-theme-dark .sidebar-link-active > svg {
+  color: #2dd4bf;
+}
+
+.buyer-workspace.buyer-theme-dark .sidebar-link-active::before {
+  background: #2dd4bf;
+}
+
+.buyer-workspace.buyer-theme-dark .sidebar-user,
+.buyer-workspace.buyer-theme-dark .buyer-settings-panel-header,
+.buyer-workspace.buyer-theme-dark .buyer-settings-footer,
+.buyer-workspace.buyer-theme-dark .quotation-item,
+.buyer-workspace.buyer-theme-dark .workspace-table th,
+.buyer-workspace.buyer-theme-dark .workspace-table td,
+.buyer-workspace.buyer-theme-dark .profile-detail-list,
+.buyer-workspace.buyer-theme-dark .request-form-footer,
+.buyer-workspace.buyer-theme-dark .factory-profile-modal-details > div {
+  border-color: #223549;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-brand-icon,
+.buyer-workspace.buyer-theme-dark .subcard-icon,
+.buyer-workspace.buyer-theme-dark .form-step-number,
+.buyer-workspace.buyer-theme-dark .user-avatar,
+.buyer-workspace.buyer-theme-dark .quote-avatar,
+.buyer-workspace.buyer-theme-dark .theme-active-badge {
+  background: rgba(45, 212, 191, 0.14);
+  border-color: rgba(45, 212, 191, 0.32);
+  color: #5eead4;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-switch-icon {
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+}
+
+.buyer-workspace.buyer-theme-dark .sidebar-count {
+  background: rgba(45, 212, 191, 0.16);
+  color: #5eead4;
+}
+
+.buyer-workspace.buyer-theme-dark .top-search,
+.buyer-workspace.buyer-theme-dark .market-search,
+.buyer-workspace.buyer-theme-dark .market-select,
+.buyer-workspace.buyer-theme-dark .workspace-field input,
+.buyer-workspace.buyer-theme-dark .workspace-field select,
+.buyer-workspace.buyer-theme-dark .workspace-field textarea,
+.buyer-workspace.buyer-theme-dark .message-composer {
+  background: #0f1d2c;
+  border-color: #283d54;
+  color: #f1f5f9;
+}
+
+.buyer-workspace.buyer-theme-dark .top-search input,
+.buyer-workspace.buyer-theme-dark .market-search input,
+.buyer-workspace.buyer-theme-dark .market-select select,
+.buyer-workspace.buyer-theme-dark .market-results-line label select,
+.buyer-workspace.buyer-theme-dark .message-composer input {
+  background: transparent;
+  color: #f1f5f9;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-field > span:first-child {
+  color: #cbd5e1;
+}
+
+.buyer-workspace.buyer-theme-dark .top-search kbd {
+  background: #182b3f;
+  border-color: #2a4058;
+  color: #94a3b8;
+}
+
+.buyer-workspace.buyer-theme-dark .topbar-divider {
+  background: #223549;
+}
+
+.buyer-workspace.buyer-theme-dark .topbar-icon:hover,
+.buyer-workspace.buyer-theme-dark .topbar-icon-active,
+.buyer-workspace.buyer-theme-dark .icon-quiet:hover {
+  background: #1b2f44;
+  color: #2dd4bf;
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-settings-nav a,
+.buyer-workspace.buyer-theme-dark .table-action,
+.buyer-workspace.buyer-theme-dark .quote-compare,
+.buyer-workspace.buyer-theme-dark .cancel-button,
+.buyer-workspace.buyer-theme-dark .outline-wide-button,
+.buyer-workspace.buyer-theme-dark .toolbar-filter,
+.buyer-workspace.buyer-theme-dark .verification-filter,
+.buyer-workspace.buyer-theme-dark .contact-factory-button,
+.buyer-workspace.buyer-theme-dark .save-factory,
+.buyer-workspace.buyer-theme-dark .selectable-chips button,
+.buyer-workspace.buyer-theme-dark .factory-tags span {
+  background: #182b3f;
+  border-color: #294058;
+  color: #cbd5e1;
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-settings-nav a:hover,
+.buyer-workspace.buyer-theme-dark .table-action:hover,
+.buyer-workspace.buyer-theme-dark .quote-compare:hover,
+.buyer-workspace.buyer-theme-dark .outline-wide-button:hover,
+.buyer-workspace.buyer-theme-dark .verification-filter.filter-selected,
+.buyer-workspace.buyer-theme-dark .selectable-chips .chip-selected {
+  border-color: #2dd4bf;
+  background: rgba(45, 212, 191, 0.14);
+  color: #5eead4;
+}
+
+.buyer-workspace.buyer-theme-dark .table-tabs button {
+  color: #94a3b8;
+}
+
+.buyer-workspace.buyer-theme-dark .table-tabs button:hover,
+.buyer-workspace.buyer-theme-dark .table-tabs .tab-active {
+  background: rgba(45, 212, 191, 0.14);
+  color: #5eead4;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-primary-button,
+.buyer-workspace.buyer-theme-dark .table-action-primary,
+.buyer-workspace.buyer-theme-dark .small-primary {
+  background: #0d9488;
+  border-color: #0d9488;
+  color: #ffffff;
+}
+
+.buyer-workspace.buyer-theme-dark .workspace-primary-button:hover:not(:disabled),
+.buyer-workspace.buyer-theme-dark .table-action-primary:hover,
+.buyer-workspace.buyer-theme-dark .small-primary:hover {
+  background: #14b8a6;
+  border-color: #14b8a6;
+}
+
+.buyer-workspace.buyer-theme-dark .progress-track {
+  background: #1f3348;
+}
+
+.buyer-workspace.buyer-theme-dark .progress-track > span {
+  background: #2dd4bf;
+}
+
+.buyer-workspace.buyer-theme-dark .upload-drop {
+  background: #101f2e;
+  border-color: #2d445d;
+  color: #94a3b8;
+}
+
+.buyer-workspace.buyer-theme-dark .upload-drop b {
+  color: #5eead4;
+}
+
+.buyer-workspace.buyer-theme-dark .request-storage-notice {
+  background: #152b3b;
+  border-color: #254459;
+  color: #cbd5e1;
+}
+
+.buyer-workspace.buyer-theme-dark .profile-save-message {
+  background: rgba(22, 163, 106, 0.16);
+  border-color: rgba(52, 211, 153, 0.35);
+  color: #6ee7b7;
+}
+
+.buyer-workspace.buyer-theme-dark .profile-edit-error {
+  background: rgba(220, 38, 38, 0.16);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #fca5a5;
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-theme-card.theme-card-active {
+  border-color: #2dd4bf;
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.18);
+}
+
+.buyer-workspace.buyer-theme-dark .buyer-avatar-preview {
+  background: rgba(45, 212, 191, 0.14);
+  border-color: rgba(45, 212, 191, 0.35);
+  color: #5eead4;
+}
+
+.buyer-workspace.buyer-theme-dark .badge-teal,
+.buyer-workspace.buyer-theme-dark .stat-mint {
+  background: rgba(45, 212, 191, 0.15);
+  color: #5eead4;
+}
+
+.buyer-workspace.buyer-theme-dark .badge-blue,
+.buyer-workspace.buyer-theme-dark .stat-blue {
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+}
+
+.buyer-workspace.buyer-theme-dark .badge-amber,
+.buyer-workspace.buyer-theme-dark .stat-amber {
+  background: rgba(251, 191, 36, 0.16);
+  color: #fcd34d;
+}
+
+.buyer-workspace.buyer-theme-dark .badge-violet,
+.buyer-workspace.buyer-theme-dark .stat-violet {
+  background: rgba(167, 139, 250, 0.16);
+  color: #c4b5fd;
+}
+
+.buyer-workspace.buyer-theme-dark .inline-success {
+  background: rgba(22, 163, 106, 0.16);
+  color: #6ee7b7;
+}
+
+.buyer-workspace.buyer-theme-dark .modal-icon-warning {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fcd34d;
+}
+
+.buyer-workspace.buyer-theme-dark .modal-icon-danger {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+}
