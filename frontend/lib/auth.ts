@@ -561,6 +561,111 @@ function getFirebaseErrorCode(error: unknown): string {
     : '';
 }
 
+/**
+ * Ensures Firebase Auth is signed in as the expected buyer/factory user before Firestore operations.
+ * Automatically re-authenticates if another tab switched users or provisions the Firebase account if created locally.
+ */
+export async function ensureFirebaseAccountSession(email?: string): Promise<FirebaseAuthUser | null> {
+  const cleanEmail = email?.trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@')) return auth.currentUser;
+
+  if (auth.currentUser?.email?.toLowerCase() === cleanEmail) {
+    return auth.currentUser;
+  }
+
+  const existingAuthUser = await waitForFirebaseUser().catch(() => null);
+  if (existingAuthUser?.email?.toLowerCase() === cleanEmail) {
+    return existingAuthUser;
+  }
+
+  const account = findAccount(cleanEmail);
+  if (!account || !account.password) {
+    return null;
+  }
+
+  try {
+    await setPersistence(auth, browserLocalPersistence).catch(() => {});
+    const cred = await signInWithEmailAndPassword(auth, cleanEmail, account.password);
+    return cred.user;
+  } catch (err) {
+    const code = getFirebaseErrorCode(err);
+    if (code === 'auth/user-not-found' || code === 'auth/invalid-credential') {
+      try {
+        const cred = await createUserWithEmailAndPassword(auth, cleanEmail, account.password);
+        const uid = cred.user.uid;
+        if (account.fullName) {
+          await updateProfile(cred.user, { displayName: account.fullName }).catch(() => {});
+        }
+        const now = new Date().toISOString();
+        await setDoc(
+          doc(db, 'users', uid),
+          {
+            uid,
+            email: cleanEmail,
+            fullName: account.fullName,
+            role: account.role,
+            phoneNumber: account.phone || '',
+            isActive: true,
+            createdAt: now,
+            updatedAt: now,
+          },
+          { merge: true },
+        ).catch(() => {});
+
+        if (account.role === 'BUYER') {
+          await setDoc(
+            doc(db, 'buyers', uid),
+            {
+              id: uid,
+              fullName: account.fullName,
+              email: cleanEmail,
+              phone: account.phone || '',
+              companyName: account.companyName || 'My Brand',
+              buyerType: account.buyerType || 'Clothing Brand',
+              country: account.country || 'Other',
+              website: account.website || '',
+              createdAt: now,
+              updatedAt: now,
+            },
+            { merge: true },
+          ).catch(() => {});
+        } else if (account.role === 'FACTORY') {
+          await setDoc(
+            doc(db, 'factories', uid),
+            {
+              id: uid,
+              fullName: account.fullName,
+              email: cleanEmail,
+              phone: account.phone || '',
+              companyName: account.companyName || 'Garment Factory',
+              country: account.country || 'Other',
+              city: account.city || '',
+              website: account.website || '',
+              monthlyCapacity: account.monthlyCapacity || 50000,
+              moq: account.moq || 500,
+              processes: account.processes || ['Cutting', 'Sewing', 'Finishing'],
+              products: account.products || ['T-shirt', 'Shirt'],
+              createdAt: now,
+              updatedAt: now,
+            },
+            { merge: true },
+          ).catch(() => {});
+        }
+
+        saveRegisteredAccount({ ...account, id: uid });
+        const current = getUser();
+        if (current && current.email.toLowerCase() === cleanEmail) {
+          saveCurrentUser({ ...current, id: uid });
+        }
+        return cred.user;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
 export async function updateBuyerAuthDisplayName(fullName: string): Promise<void> {
   const currentUser = auth.currentUser;
   if (!currentUser || !fullName.trim()) return;

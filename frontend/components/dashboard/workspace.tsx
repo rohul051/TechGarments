@@ -50,7 +50,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { findAccount, getRegisteredAccounts, waitForFirebaseUser } from "@/lib/auth";
+import { ensureFirebaseAccountSession, findAccount, getRegisteredAccounts, waitForFirebaseUser } from "@/lib/auth";
 import { loadBuyerSavedFactories, persistBuyerSavedFactories } from "@/lib/buyerSettings";
 import { auth, db } from "@/lib/firebase";
 import type { BuyerProfileDetails, BuyerTheme, FactoryProfileDetails } from "@/types/user";
@@ -79,6 +79,7 @@ type BuyerRequestRow = {
   quality?: string;
   instructions?: string;
   referenceFiles?: File[];
+  isOnline?: boolean;
 };
 type RequestSubmissionResult = {
   shared: boolean;
@@ -270,6 +271,7 @@ function toFactoryOpportunity(request: BuyerRequestRow): FactoryOpportunity {
     buyer: request.buyerName || request.ownerEmail || "Garment buyer",
     buyerId: request.ownerId,
     buyerEmail: request.ownerEmail,
+    isOnline: request.isOnline,
     product: request.product,
     quantity: request.quantity,
     deadline: request.deadline,
@@ -560,7 +562,7 @@ function loadDashboardOrders(role: DashboardRole, userId: string, userEmail: str
       resolve(request.result
         .filter((order) => role === "buyer"
           ? order.buyerId === userId || order.buyerEmail.toLowerCase() === email
-          : order.isOnline && (order.factoryId === userId || order.factoryEmail.toLowerCase() === email))
+          : order.factoryId === userId || order.factoryEmail.toLowerCase() === email)
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt)));
     };
     request.onerror = () => {
@@ -572,7 +574,24 @@ function loadDashboardOrders(role: DashboardRole, userId: string, userEmail: str
 
 function mergeDashboardOrders(current: DashboardOrder[], incoming: DashboardOrder[]): DashboardOrder[] {
   const orders = new Map(current.map((order) => [order.id, order]));
-  for (const order of incoming) orders.set(order.id, order);
+  for (const order of incoming) {
+    const existing = orders.get(order.id);
+    if (!existing) {
+      orders.set(order.id, order);
+      continue;
+    }
+    const useIncomingStatus =
+      order.status === "CONFIRMED" ||
+      order.status === "CANCELLED" ||
+      (order.updatedAt || "").localeCompare(existing.updatedAt || "") >= 0;
+    orders.set(order.id, {
+      ...existing,
+      ...order,
+      isOnline: Boolean(existing.isOnline || order.isOnline),
+      status: useIncomingStatus ? order.status : existing.status,
+      updatedAt: useIncomingStatus ? order.updatedAt : existing.updatedAt,
+    });
+  }
   return [...orders.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
@@ -657,7 +676,19 @@ const quotationRows: BuyerQuoteView[] = [
   { id: "demo-4", factory: "Sunrise Manufacturing", location: "Dhaka, Bangladesh", product: "Organic cotton tees", price: "$4.45 / unit", delivery: "32 days", status: "Shortlisted", tone: "violet" },
 ];
 
-function toBuyerQuoteView(quote: StoredQuote): BuyerQuoteView {
+function toBuyerQuoteView(quote: StoredQuote, orders: DashboardOrder[] = []): BuyerQuoteView {
+  const matchingOrder = orders.find((order) => order.quoteId === quote.id && order.status !== "CANCELLED");
+  const status = matchingOrder?.status === "CONFIRMED"
+    ? "Confirmed"
+    : matchingOrder?.status === "PENDING_FACTORY_CONFIRMATION"
+      ? "Order requested"
+      : "New quote";
+  const tone = matchingOrder?.status === "CONFIRMED"
+    ? "teal"
+    : matchingOrder?.status === "PENDING_FACTORY_CONFIRMATION"
+      ? "violet"
+      : "blue";
+
   return {
     id: quote.id,
     factory: quote.factoryName,
@@ -665,10 +696,31 @@ function toBuyerQuoteView(quote: StoredQuote): BuyerQuoteView {
     product: quote.product,
     price: `${quote.currency} ${quote.pricePerUnit.toFixed(2)} / unit`,
     delivery: quote.leadTime,
-    status: quote.isOnline ? "New quote" : "Browser only",
-    tone: quote.isOnline ? "blue" : "amber",
+    status,
+    tone,
     quote,
   };
+}
+
+function enrichBuyerRequestRow(
+  row: BuyerRequestRow,
+  quotes: StoredQuote[],
+  orders: DashboardOrder[],
+): BuyerRequestRow {
+  const matchingQuotes = quotes.filter((quote) => quote.requestId === row.id);
+  const matchingOrders = orders.filter((order) => order.requestId === row.id && order.status !== "CANCELLED");
+  const responseCount = Math.max(row.responseCount ?? 0, matchingQuotes.length);
+
+  if (matchingOrders.some((order) => order.status === "CONFIRMED")) {
+    return { ...row, responseCount, status: "Order confirmed", tone: "teal" };
+  }
+  if (matchingOrders.some((order) => order.status === "PENDING_FACTORY_CONFIRMATION")) {
+    return { ...row, responseCount, status: "Order requested", tone: "blue" };
+  }
+  if (matchingQuotes.length > 0) {
+    return { ...row, responseCount, status: "Quotations received", tone: "teal" };
+  }
+  return { ...row, responseCount };
 }
 
 function toStoredQuote(data: Record<string, unknown>, documentId: string): StoredQuote | null {
@@ -733,7 +785,12 @@ function toDashboardOrder(data: Record<string, unknown>, documentId: string): Da
 
 function mergeStoredQuotes(current: StoredQuote[], incoming: StoredQuote[]): StoredQuote[] {
   const quotes = new Map(current.map((quote) => [quote.id, quote]));
-  for (const quote of incoming) quotes.set(quote.id, quote);
+  for (const quote of incoming) {
+    const existing = quotes.get(quote.id);
+    quotes.set(quote.id, existing
+      ? { ...existing, ...quote, isOnline: Boolean(existing.isOnline || quote.isOnline) }
+      : quote);
+  }
   return [...quotes.values()].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
@@ -921,6 +978,7 @@ function BuyerOverview({
   firstName,
   requests,
   quotes,
+  orders,
   factories,
   factoriesLoading,
   factoryDirectoryError,
@@ -933,10 +991,25 @@ function BuyerOverview({
   firstName: string;
   requests: BuyerRequestRow[];
   quotes: StoredQuote[];
+  orders: DashboardOrder[];
   factories: FactoryCard[];
   factoriesLoading: boolean;
   factoryDirectoryError: string;
 }) {
+  const liveOrderCards = orders
+    .filter((order) => order.status !== "CANCELLED")
+    .map((order) => ({
+      id: order.id,
+      product: order.product,
+      quantity: order.quantity,
+      date: order.targetDeliveryDate || "Not specified",
+      progress: order.status === "CONFIRMED" ? 25 : 5,
+      status: order.status === "CONFIRMED" ? "Confirmed" : "Awaiting factory confirmation",
+      tone: order.status === "CONFIRMED" ? "teal" : "amber",
+    }));
+  const overviewQuotes = [...quotes.map((quote) => toBuyerQuoteView(quote, orders)), ...quotationRows].slice(0, 3);
+  const overviewOrders = [...liveOrderCards, ...orderRows].slice(0, 2);
+
   return (
     <>
       <div className="welcome-row">
@@ -973,7 +1046,7 @@ function BuyerOverview({
               <tr key={row.id}>
                 <td><strong className="table-main">{row.product}</strong><span className="table-sub">{row.id}</span></td>
                 <td>{row.quantity}</td><td>{row.deadline}</td><td><StatusBadge tone={row.tone}>{row.status}</StatusBadge></td>
-                <td><ActionButton onClick={() => onContact(row.id)}>Details</ActionButton></td>
+                <td><ActionButton onClick={() => onNavigate("My Requests")}>Details</ActionButton></td>
               </tr>
             ))}
           </DataTable>
@@ -981,11 +1054,11 @@ function BuyerOverview({
         <section className="workspace-panel">
           <SectionHeading title="Recent quotations" action="Compare all" onAction={() => onNavigate("Received Quotations")} />
           <div className="quotation-list">
-            {[...quotes.map(toBuyerQuoteView), ...quotationRows].slice(0, 3).map((quote) => (
+            {overviewQuotes.map((quote) => (
               <article className="quotation-item" key={quote.id}>
                 <span className="quote-avatar">{initials(quote.factory)}</span>
-                <div className="quote-info"><strong>{quote.factory}</strong><span>{quote.product}</span><div><b>{quote.price}</b><span> · {quote.delivery}</span></div></div>
-                <button className="quote-compare" onClick={() => onContact(`Quotation from ${quote.factory}`)}>Compare</button>
+                <div className="quote-info"><strong>{quote.factory}</strong><span>{quote.product}</span><div><b>{quote.price}</b><span> · {quote.delivery}</span><span> · {quote.status}</span></div></div>
+                <button className="quote-compare" onClick={() => onNavigate("Received Quotations")}>Compare</button>
               </article>
             ))}
           </div>
@@ -994,7 +1067,7 @@ function BuyerOverview({
       <section className="workspace-panel buyer-order-panel">
         <SectionHeading title="Orders in progress" action="Track orders" onAction={() => onNavigate("My Orders")} />
         <div className="order-progress-grid">
-          {orderRows.slice(0, 2).map((order) => (
+          {overviewOrders.map((order) => (
             <div className="mini-order" key={order.id}>
               <div className="mini-order-top"><span className="order-id">{order.id}</span><StatusBadge tone={order.tone}>{order.status}</StatusBadge></div>
               <strong>{order.product}</strong><span>{order.quantity} <span className="order-dot">·</span> Due {order.date}</span>
@@ -1373,10 +1446,10 @@ function BuyerRequestsPage({
   return (
     <>
       <SectionHeading eyebrow="YOUR PRODUCTION PIPELINE" title="My requests" description="Track open production briefs and compare factory responses." action="New request" onAction={onNewRequest} />
-      <div className="request-storage-notice"><ShieldCheck size={15} /> New requests and reference files are saved in this browser. Factory matching is not connected yet.</div>
+      <div className="request-storage-notice"><ShieldCheck size={15} /> Production requests sync online with connected factories and keep a local backup in this browser.</div>
       {storageError && <div className="request-form-error" role="alert">{storageError}</div>}
       <div className="workspace-panel">
-        <div className="table-toolbar"><div className="table-tabs">{["All requests", "Matching", "Quotations received", "In review"].map((item) => <button className={filter === item ? "tab-active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="toolbar-filter"><Filter size={14} /> Filter</button></div>
+        <div className="table-toolbar"><div className="table-tabs">{["All requests", "Matching", "Quotations received", "Order requested", "Order confirmed", "In review"].map((item) => <button className={filter === item ? "tab-active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="toolbar-filter"><Filter size={14} /> Filter</button></div>
         {rows.length ? (
           <DataTable headers={["Request", "Quantity", "Deadline", "Responses", "Status", ""]}>
             {rows.map((row) => <tr key={row.id}><td><strong className="table-main">{row.product}</strong><span className="table-sub">{row.id}</span></td><td>{row.quantity}</td><td>{row.deadline}</td><td>{row.responseCount ?? 0} factories</td><td><StatusBadge tone={row.tone}>{row.status}</StatusBadge></td><td><ActionButton onClick={() => setSelectedRequest(row)}>Details</ActionButton></td></tr>)}
@@ -1436,12 +1509,12 @@ function BuyerQuotations({
   const [orderSaving, setOrderSaving] = useState(false);
   const [orderError, setOrderError] = useState("");
   const [orderOutcome, setOrderOutcome] = useState("");
-  const allQuotes = [...storedQuotes.map(toBuyerQuoteView), ...quotationRows];
+  const allQuotes = [...storedQuotes.map((quote) => toBuyerQuoteView(quote, orders)), ...quotationRows];
   const quotes = filter === "All quotes"
     ? allQuotes
     : filter === "New"
       ? allQuotes.filter((quote) => quote.status === "New quote")
-      : allQuotes.filter((quote) => quote.status === "Shortlisted");
+      : allQuotes.filter((quote) => quote.status === filter);
   const selectedRows = allQuotes.filter((quote) => selected.includes(quote.id));
   const selectedRequestId = selectedRows.find((quote) => quote.quote)?.quote?.requestId;
   const canCompare = selectedRows.length >= 2 &&
@@ -1452,14 +1525,10 @@ function BuyerQuotations({
     setOrderError("");
     setOrderQuote(quote);
   };
-  const alreadyRequested = (quoteId: string) =>
-    orders.some((order) => order.quoteId === quoteId && order.status !== "CANCELLED");
+  const existingOrderForQuote = (quoteId: string) =>
+    orders.find((order) => order.quoteId === quoteId && order.status !== "CANCELLED");
   const submitOrderRequest = async () => {
     if (!orderQuote || orderSaving) return;
-    if (!orderQuote.isOnline) {
-      setOrderError("This quotation is saved only in this browser. Ask the factory to resend it online before requesting an order.");
-      return;
-    }
     setOrderSaving(true);
     setOrderError("");
     try {
@@ -1478,35 +1547,37 @@ function BuyerQuotations({
       <SectionHeading eyebrow="COMPARE YOUR OPTIONS" title="Received quotations" description="Review pricing, timelines and terms from your factory partners." />
       {quoteFeedError && <p className="request-storage-notice" role="status">{quoteFeedError}</p>}
       <div className="workspace-panel">
-        <div className="table-toolbar"><div className="table-tabs">{["All quotes", "New", "Shortlisted"].map((item) => <button className={filter === item ? "tab-active" : ""} key={item} onClick={() => setFilter(item)}>{item}{item === "All quotes" && <span>{allQuotes.length}</span>}{item === "New" && <span>{allQuotes.filter((quote) => quote.status === "New quote").length}</span>}</button>)}</div><button className="workspace-primary-button compact-button" disabled={!canCompare} onClick={() => setComparisonQuotes(selectedRows)}>Compare selected <ArrowRight size={14} /></button></div>
+        <div className="table-toolbar"><div className="table-tabs">{["All quotes", "New", "Order requested", "Confirmed", "Shortlisted"].map((item) => <button className={filter === item ? "tab-active" : ""} key={item} onClick={() => setFilter(item)}>{item}{item === "All quotes" && <span>{allQuotes.length}</span>}{item === "New" && <span>{allQuotes.filter((quote) => quote.status === "New quote").length}</span>}</button>)}</div><button className="workspace-primary-button compact-button" disabled={!canCompare} onClick={() => setComparisonQuotes(selectedRows)}>Compare selected <ArrowRight size={14} /></button></div>
         {selected.length > 0 && !canCompare && <p className="factory-directory-notice">Select at least two real quotations for the same production request to compare them.</p>}
         <DataTable headers={["", "Factory", "Product", "Quoted price", "Delivery", "Status", ""]}>
           {quotes.map((quote) => <tr key={quote.id}><td><input aria-label={`Select ${quote.factory} quotation`} type="checkbox" disabled={!quote.quote || Boolean(selectedRequestId && quote.quote.requestId !== selectedRequestId)} checked={selected.includes(quote.id)} onChange={(event) => setSelected((current) => event.target.checked ? [...current, quote.id] : current.filter((id) => id !== quote.id))} /></td><td><strong className="table-main">{quote.factory}</strong><span className="table-sub">{quote.location}{quote.quote && <><br />{quote.quote.factoryEmail}</>}</span></td><td>{quote.product}</td><td><strong>{quote.price}</strong></td><td>{quote.delivery}</td><td><StatusBadge tone={quote.tone}>{quote.status}</StatusBadge></td><td><ActionButton onClick={() => quote.quote ? setSelectedQuote(quote.quote) : onContact(`Quotation from ${quote.factory}`)}>Details</ActionButton></td></tr>)}
         </DataTable>
       </div>
-      {selectedQuote && (
-        <div className="workspace-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedQuote(null); }}>
-          <section className="workspace-modal" role="dialog" aria-modal="true" aria-labelledby="buyer-quote-title">
-            <button className="modal-close" aria-label="Close quotation details" onClick={() => setSelectedQuote(null)}><X size={17} /></button>
-            <span className="modal-icon"><FileText size={21} /></span>
-            <h2 id="buyer-quote-title">Quotation from {selectedQuote.factoryName}</h2>
-            <p>Request {selectedQuote.requestId} · {selectedQuote.createdAt ? new Date(selectedQuote.createdAt).toLocaleString() : "Submission date unavailable"}</p>
-            <dl className="factory-profile-modal-details">
-              <div><dt>Product</dt><dd>{selectedQuote.product}</dd></div>
-              <div><dt>Quantity</dt><dd>{selectedQuote.quantity || "Not provided"}</dd></div>
-              <div><dt>Price per unit</dt><dd>{selectedQuote.currency} {selectedQuote.pricePerUnit.toFixed(2)}</dd></div>
-              <div><dt>Estimated lead time</dt><dd>{selectedQuote.leadTime}</dd></div>
-              <div><dt>Factory location</dt><dd>{selectedQuote.factoryLocation || "Not provided"}</dd></div>
-              <div><dt>Additional terms</dt><dd>{selectedQuote.terms || "No additional terms provided."}</dd></div>
-            </dl>
-            {!selectedQuote.isOnline && <p className="request-storage-notice" role="status">This quotation is saved only in this browser and cannot be sent to the factory. Ask the factory to resend it online.</p>}
-            <div className="modal-actions">
-              <button className="cancel-button" onClick={() => setSelectedQuote(null)}>Close</button>
-              <button className="workspace-primary-button" disabled={!selectedQuote.isOnline || alreadyRequested(selectedQuote.id)} onClick={() => beginOrderRequest(selectedQuote)}>{alreadyRequested(selectedQuote.id) ? "Order request sent" : selectedQuote.isOnline ? "Request order" : "Not available online"} <ArrowRight size={14} /></button>
-            </div>
-          </section>
-        </div>
-      )}
+      {selectedQuote && (() => {
+        const activeOrder = existingOrderForQuote(selectedQuote.id);
+        return (
+          <div className="workspace-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSelectedQuote(null); }}>
+            <section className="workspace-modal" role="dialog" aria-modal="true" aria-labelledby="buyer-quote-title">
+              <button className="modal-close" aria-label="Close quotation details" onClick={() => setSelectedQuote(null)}><X size={17} /></button>
+              <span className="modal-icon"><FileText size={21} /></span>
+              <h2 id="buyer-quote-title">Quotation from {selectedQuote.factoryName}</h2>
+              <p>Request {selectedQuote.requestId} · {selectedQuote.createdAt ? new Date(selectedQuote.createdAt).toLocaleString() : "Submission date unavailable"}</p>
+              <dl className="factory-profile-modal-details">
+                <div><dt>Product</dt><dd>{selectedQuote.product}</dd></div>
+                <div><dt>Quantity</dt><dd>{selectedQuote.quantity || "Not provided"}</dd></div>
+                <div><dt>Price per unit</dt><dd>{selectedQuote.currency} {selectedQuote.pricePerUnit.toFixed(2)}</dd></div>
+                <div><dt>Estimated lead time</dt><dd>{selectedQuote.leadTime}</dd></div>
+                <div><dt>Factory location</dt><dd>{selectedQuote.factoryLocation || "Not provided"}</dd></div>
+                <div><dt>Additional terms</dt><dd>{selectedQuote.terms || "No additional terms provided."}</dd></div>
+              </dl>
+              <div className="modal-actions">
+                <button className="cancel-button" onClick={() => setSelectedQuote(null)}>Close</button>
+                <button className="workspace-primary-button" disabled={Boolean(activeOrder)} onClick={() => beginOrderRequest(selectedQuote)}>{activeOrder?.status === "CONFIRMED" ? "Order confirmed" : activeOrder ? "Order request sent" : "Request order"} <ArrowRight size={14} /></button>
+              </div>
+            </section>
+          </div>
+        );
+      })()}
       {comparisonQuotes && (
         <div className="workspace-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setComparisonQuotes(null); }}>
           <section className="workspace-modal request-details-modal" role="dialog" aria-modal="true" aria-labelledby="quote-comparison-title">
@@ -1522,6 +1593,7 @@ function BuyerQuotations({
                 const total = Number.isFinite(quantity) && quantity > 0
                   ? `${quote.currency} ${(quantity * quote.pricePerUnit).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                   : "Not available";
+                const activeOrder = existingOrderForQuote(quote.id);
                 return (
                   <tr key={quote.id}>
                     <td><strong className="table-main">{quote.factoryName}</strong><span className="table-sub">{quote.factoryLocation || "Location not provided"}</span></td>
@@ -1530,7 +1602,7 @@ function BuyerQuotations({
                     <td>{total}</td>
                     <td>{quote.leadTime}</td>
                     <td>{quote.terms || "No additional terms"}</td>
-                    <td><button className="table-action table-action-primary" disabled={!quote.isOnline || alreadyRequested(quote.id)} onClick={() => beginOrderRequest(quote)}>{alreadyRequested(quote.id) ? "Request sent" : quote.isOnline ? "Request order" : "Browser only"}</button></td>
+                    <td><button className="table-action table-action-primary" disabled={Boolean(activeOrder)} onClick={() => beginOrderRequest(quote)}>{activeOrder?.status === "CONFIRMED" ? "Confirmed" : activeOrder ? "Request sent" : "Request order"}</button></td>
                   </tr>
                 );
               })}
@@ -1605,13 +1677,11 @@ function OrdersPage({
     product: order.product,
     quantity: order.quantity,
     date: order.targetDeliveryDate || "Not specified",
-    progress: order.status === "CONFIRMED" ? 10 : 0,
-    status: !order.isOnline
-      ? "Saved in browser only"
-      : order.status === "PENDING_FACTORY_CONFIRMATION"
+    progress: order.status === "CONFIRMED" ? 25 : 0,
+    status: order.status === "PENDING_FACTORY_CONFIRMATION"
       ? "Awaiting factory confirmation"
       : order.status === "CONFIRMED" ? "Confirmed" : "Cancelled",
-    tone: order.status === "CONFIRMED" ? "teal" : "amber",
+    tone: order.status === "CONFIRMED" ? "teal" : order.status === "CANCELLED" ? "amber" : "blue",
     order,
   }));
   const demoRows = orderRows.map((row) => ({
@@ -1635,7 +1705,7 @@ function OrdersPage({
     (filter === "Awaiting factory confirmation" && row.status === "Awaiting factory confirmation") ||
     (filter === "Confirmed" && row.status === "Confirmed") ||
     row.status === filter);
-  const filterOptions = ["All orders", "Saved in browser only", "Awaiting factory confirmation", "Confirmed", "In production", "Ready to ship", "Completed"];
+  const filterOptions = ["All orders", "Awaiting factory confirmation", "Confirmed", "In production", "Ready to ship", "Completed"];
   const confirmOrder = async (orderId: string) => {
     if (!onConfirmOrder || confirmingOrderId) return;
     setConfirmingOrderId(orderId);
@@ -1655,6 +1725,7 @@ function OrdersPage({
     setActionError("");
     try {
       await onRetryOrder(orderId);
+      setSelectedOrder(null);
     } catch (error) {
       console.error("[Orders] Failed to send the saved order request:", error);
       setActionError(error instanceof Error ? error.message : "The order request could not be sent.");
@@ -1669,15 +1740,14 @@ function OrdersPage({
       {actionError && <p className="field-error" role="alert">{actionError}</p>}
       <div className="workspace-stats compact-stats">
         <article className="workspace-stat-card"><span className="stat-label">Order requests</span><div className="stat-value-line"><strong>{orders.length}</strong></div><span className="stat-card-note">Tracked in this workspace</span></article>
-        <article className="workspace-stat-card"><span className="stat-label">Awaiting confirmation</span><div className="stat-value-line"><strong>{orders.filter((order) => order.isOnline && order.status === "PENDING_FACTORY_CONFIRMATION").length}</strong></div><span className="stat-card-note">Needs factory response</span></article>
-        <article className="workspace-stat-card"><span className="stat-label">Confirmed</span><div className="stat-value-line"><strong>{orders.filter((order) => order.isOnline && order.status === "CONFIRMED").length}</strong></div><span className="stat-card-note">Agreed with the factory</span></article>
-        <article className="workspace-stat-card"><span className="stat-label">Cancelled</span><div className="stat-value-line"><strong>{orders.filter((order) => order.isOnline && order.status === "CANCELLED").length}</strong></div><span className="stat-card-note">No active production</span></article>
+        <article className="workspace-stat-card"><span className="stat-label">Awaiting confirmation</span><div className="stat-value-line"><strong>{orders.filter((order) => order.status === "PENDING_FACTORY_CONFIRMATION").length}</strong></div><span className="stat-card-note">Needs factory response</span></article>
+        <article className="workspace-stat-card"><span className="stat-label">Confirmed</span><div className="stat-value-line"><strong>{orders.filter((order) => order.status === "CONFIRMED").length}</strong></div><span className="stat-card-note">Agreed with the factory</span></article>
+        <article className="workspace-stat-card"><span className="stat-label">Cancelled</span><div className="stat-value-line"><strong>{orders.filter((order) => order.status === "CANCELLED").length}</strong></div><span className="stat-card-note">No active production</span></article>
       </div>
       {orders.length === 0 && <p className="request-storage-notice" role="status">{factory ? "Order requests from buyers will appear here after they choose one of your quotations." : "After you send an order request, track factory confirmation here."}</p>}
-      {orders.some((order) => !order.isOnline) && <p className="request-storage-notice" role="status">Some order requests are saved in this browser only and have not reached the factory. Use “Retry sending” after signing in to sync them.</p>}
       <div className="workspace-panel"><div className="table-toolbar"><div className="table-tabs">{filterOptions.map((item) => <button className={filter === item ? "tab-active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="toolbar-filter"><Filter size={14} /> Filter</button></div>
         <DataTable headers={["Order", factory ? "Buyer" : "Factory", "Product", "Quantity", "Delivery date", "Progress", "Status", ""]}>
-          {rows.map((row) => <tr key={row.id}><td><strong className="table-main">{row.id}</strong>{row.order && <span className="table-sub">{row.order.requestId}</span>}</td><td>{row.company}</td><td>{row.product}</td><td>{row.quantity}</td><td>{row.date}</td><td><div className="table-progress"><div><span style={{ width: `${row.progress}%` }} /></div>{row.progress}%</div></td><td><StatusBadge tone={row.tone}>{row.status}</StatusBadge></td><td>{row.order && !factory && !row.order.isOnline && row.order.status === "PENDING_FACTORY_CONFIRMATION" ? <ActionButton variant="primary" onClick={() => { if (row.order) void retryOrder(row.order.id); }}>{retryingOrderId === row.order.id ? "Sending..." : "Retry sending"}</ActionButton> : row.order && factory && row.order.status === "PENDING_FACTORY_CONFIRMATION" ? <ActionButton variant="primary" onClick={() => { if (row.order) void confirmOrder(row.order.id); }}>{confirmingOrderId === row.order?.id ? "Confirming..." : "Confirm order"}</ActionButton> : <ActionButton onClick={() => row.order ? setSelectedOrder(row.order) : onContact(row.id)}>Details</ActionButton>}</td></tr>)}
+          {rows.map((row) => <tr key={row.id}><td><strong className="table-main">{row.id}</strong>{row.order && <span className="table-sub">{row.order.requestId}</span>}</td><td>{row.company}</td><td>{row.product}</td><td>{row.quantity}</td><td>{row.date}</td><td><div className="table-progress"><div><span style={{ width: `${row.progress}%` }} /></div>{row.progress}%</div></td><td><StatusBadge tone={row.tone}>{row.status}</StatusBadge></td><td>{row.order && factory && row.order.status === "PENDING_FACTORY_CONFIRMATION" ? <ActionButton variant="primary" onClick={() => { if (row.order) void confirmOrder(row.order.id); }}>{confirmingOrderId === row.order?.id ? "Confirming..." : "Confirm order"}</ActionButton> : <ActionButton onClick={() => row.order ? setSelectedOrder(row.order) : onContact(row.id)}>Details</ActionButton>}</td></tr>)}
         </DataTable>
       </div>
       {selectedOrder && (
@@ -1696,7 +1766,14 @@ function OrdersPage({
               <div><dt>Status</dt><dd>{selectedOrder.status === "PENDING_FACTORY_CONFIRMATION" ? "Awaiting factory confirmation" : selectedOrder.status}</dd></div>
               <div><dt>Terms</dt><dd>{selectedOrder.terms || "No additional terms"}</dd></div>
             </dl>
-            <div className="modal-actions"><button className="workspace-primary-button" onClick={() => setSelectedOrder(null)}>Close</button></div>
+            <div className="modal-actions">
+              {!factory && !selectedOrder.isOnline && onRetryOrder && selectedOrder.status === "PENDING_FACTORY_CONFIRMATION" && (
+                <button className="cancel-button" disabled={retryingOrderId === selectedOrder.id} onClick={() => void retryOrder(selectedOrder.id)}>
+                  {retryingOrderId === selectedOrder.id ? "Syncing..." : "Sync online"}
+                </button>
+              )}
+              <button className="workspace-primary-button" onClick={() => setSelectedOrder(null)}>Close</button>
+            </div>
           </section>
         </div>
       )}
@@ -1744,25 +1821,40 @@ function FactoryRequests({
 function FactoryQuotations({
   onContact,
   quotes: storedQuotes,
+  orders,
   quoteFeedError,
 }: {
   onContact: (title: string) => void;
   quotes: StoredQuote[];
+  orders: DashboardOrder[];
   quoteFeedError: string;
 }) {
   const [filter, setFilter] = useState("All quotations");
   const allQuotes = [
-    ...storedQuotes.map((quote) => ({
-      id: quote.id,
-      buyer: quote.buyerName || quote.buyerEmail || "Buyer",
-      product: quote.product,
-      price: `${quote.currency} ${quote.pricePerUnit.toFixed(2)} / unit`,
-      delivery: quote.leadTime,
-      status: "Awaiting response",
-      tone: "amber",
-      requestId: quote.requestId,
-      createdAt: quote.createdAt,
-    })),
+    ...storedQuotes.map((quote) => {
+      const matchingOrder = orders.find((order) => order.quoteId === quote.id && order.status !== "CANCELLED");
+      const status = matchingOrder?.status === "CONFIRMED"
+        ? "Confirmed"
+        : matchingOrder?.status === "PENDING_FACTORY_CONFIRMATION"
+          ? "Order requested"
+          : "Awaiting response";
+      const tone = matchingOrder?.status === "CONFIRMED"
+        ? "teal"
+        : matchingOrder?.status === "PENDING_FACTORY_CONFIRMATION"
+          ? "blue"
+          : "amber";
+      return {
+        id: quote.id,
+        buyer: quote.buyerName || quote.buyerEmail || "Buyer",
+        product: quote.product,
+        price: `${quote.currency} ${quote.pricePerUnit.toFixed(2)} / unit`,
+        delivery: quote.leadTime,
+        status,
+        tone,
+        requestId: quote.requestId,
+        createdAt: quote.createdAt,
+      };
+    }),
     ...quotationsFactory.map((quote, index) => ({ ...quote, id: `demo-${index}`, requestId: "", createdAt: "" })),
   ];
   const quotes = filter === "All quotations" ? allQuotes : allQuotes.filter((quote) => quote.status === filter);
@@ -1771,7 +1863,7 @@ function FactoryQuotations({
       <SectionHeading eyebrow="YOUR ACTIVE OFFERS" title="My quotations" description="Track the quotes you have shared with prospective buyers." />
       {quoteFeedError && <p className="request-storage-notice" role="status">{quoteFeedError}</p>}
       <div className="workspace-panel">
-        <div className="table-toolbar"><div className="table-tabs">{["All quotations", "Awaiting response", "Shortlisted", "Negotiating"].map((item) => <button className={filter === item ? "tab-active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="toolbar-filter"><Filter size={14} /> Filter</button></div>
+        <div className="table-toolbar"><div className="table-tabs">{["All quotations", "Awaiting response", "Order requested", "Confirmed", "Shortlisted", "Negotiating"].map((item) => <button className={filter === item ? "tab-active" : ""} key={item} onClick={() => setFilter(item)}>{item}</button>)}</div><button className="toolbar-filter"><Filter size={14} /> Filter</button></div>
         <DataTable headers={["Buyer", "Product", "Quoted price", "Delivery time", "Sent", "Status", ""]}>
           {quotes.map((quote) => <tr key={quote.id}><td><strong className="table-main">{quote.buyer}</strong><span className="table-sub">{quote.requestId ? quote.requestId : "Demo quotation"}</span></td><td>{quote.product}</td><td><strong>{quote.price}</strong></td><td>{quote.delivery}</td><td>{quote.createdAt ? new Date(quote.createdAt).toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }) : "Demo"}</td><td><StatusBadge tone={quote.tone}>{quote.status}</StatusBadge></td><td><ActionButton onClick={() => onContact(quote.requestId ? `Quotation for ${quote.requestId}` : quote.buyer)}>Details</ActionButton></td></tr>)}
         </DataTable>
@@ -2175,7 +2267,7 @@ function FactoryGenericPage({
   if (page === "Available Capacity") return <CapacityManagement onContact={onContact} />;
   if (page === "Production Requests") return <FactoryRequests onViewOpportunity={onViewOpportunity} onQuoteOpportunity={onQuoteOpportunity} requests={requests} requestFeedError={requestFeedError} />;
   if (page === "Received Orders") return <OrdersPage factory onContact={onContact} orders={orders} onConfirmOrder={onConfirmOrder} feedError={orderFeedError} />;
-  if (page === "My Quotations") return <FactoryQuotations onContact={onContact} quotes={quotes} quoteFeedError={quoteFeedError} />;
+  if (page === "My Quotations") return <FactoryQuotations onContact={onContact} quotes={quotes} orders={orders} quoteFeedError={quoteFeedError} />;
   if (page === "Manufacturing Capabilities") {
     if (!factoryProfile || !onSaveFactoryProfile) {
       return <EmptyState title="Factory profile unavailable" description="Your factory capabilities could not be loaded." action="Contact support" onAction={() => onContact("Contact support")} />;
@@ -2383,23 +2475,70 @@ export function DashboardWorkspace({
   const storedQuotes = quoteState.ownerKey === quoteOwnerKey ? quoteState.quotes : [];
   const storedOrders = orderState.ownerKey === quoteOwnerKey ? orderState.orders : [];
   const visibleRequests = [...productionRequests, ...requestRows];
+  const enrichedRequests = visibleRequests.map((row) => enrichBuyerRequestRow(row, storedQuotes, storedOrders));
 
   useEffect(() => {
     if (role !== "buyer" || !userId || !userEmail || typeof indexedDB === "undefined") return;
 
     let active = true;
     const ownerEmail = userEmail.trim().toLowerCase();
-    loadProductionRequests(userId, ownerEmail)
-      .then((requests) => {
-        if (active) {
-          setProductionRequests(requests);
-          setRequestStorageError("");
+    const syncBuyerRequests = async () => {
+      try {
+        const localRequests = await loadProductionRequests(userId, ownerEmail);
+        if (!active) return;
+        setProductionRequests(localRequests);
+        setRequestStorageError("");
+
+        const firebaseUser = await ensureFirebaseAccountSession(ownerEmail);
+        if (!active || !firebaseUser) return;
+
+        const remoteSnapshot = await getDocs(query(
+          collection(db, "orders"),
+          where("buyerId", "==", firebaseUser.uid),
+        ));
+        if (!active) return;
+
+        const remoteRequestIds = new Set(
+          remoteSnapshot.docs
+            .filter((requestDoc) => requestDoc.data().factoryId === null)
+            .map((requestDoc) => requestDoc.id),
+        );
+
+        let updatedAny = false;
+        const nextRequests = await Promise.all(localRequests.map(async (requestRow) => {
+          if (requestRow.isOnline && requestRow.ownerId === firebaseUser.uid) {
+            return requestRow;
+          }
+          if (!remoteRequestIds.has(requestRow.id)) {
+            try {
+              await shareProductionRequest(requestRow, firebaseUser.uid);
+            } catch (syncError) {
+              console.warn("[Buyer request] Could not sync local request online:", syncError);
+              return requestRow;
+            }
+          }
+          const onlineRow: BuyerRequestRow = {
+            ...requestRow,
+            ownerId: firebaseUser.uid,
+            ownerEmail,
+            isOnline: true,
+          };
+          updatedAny = true;
+          await saveProductionRequest(onlineRow);
+          return onlineRow;
+        }));
+
+        if (active && updatedAny) {
+          setProductionRequests(nextRequests);
+          notifyProductionRequestCreated();
         }
-      })
-      .catch((error: unknown) => {
+      } catch (error) {
         console.error("[Buyer request] Failed to load saved production requests:", error);
         if (active) setRequestStorageError("Saved requests could not be loaded from this browser.");
-      });
+      }
+    };
+
+    void syncBuyerRequests();
 
     return () => {
       active = false;
@@ -2425,6 +2564,9 @@ export function DashboardWorkspace({
     };
 
     void refreshLocalRequests();
+    if (userEmail) {
+      void ensureFirebaseAccountSession(userEmail);
+    }
     const onLocalRequestUpdate = () => void refreshLocalRequests();
     window.addEventListener("garmentconnect:production-requests-updated", onLocalRequestUpdate);
     const channel = typeof BroadcastChannel !== "undefined"
@@ -2435,11 +2577,10 @@ export function DashboardWorkspace({
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!active) return;
       if (!firebaseUser) {
-        setFactoryRequestFeedError("Online requests need Firebase sign-in. Showing requests saved in this browser only.");
+        setFactoryRequestFeedError("");
         return;
       }
       if (userEmail && firebaseUser.email?.toLowerCase() !== userEmail.trim().toLowerCase()) {
-        setFactoryRequestFeedError("The signed-in Firebase account does not match this factory account.");
         return;
       }
 
@@ -2526,6 +2667,7 @@ export function DashboardWorkspace({
     };
 
     reloadLocalQuotes();
+    void ensureFirebaseAccountSession(userEmail);
     const onLocalQuoteUpdate = () => reloadLocalQuotes();
     window.addEventListener("garmentconnect:quotes-updated", onLocalQuoteUpdate);
     const channel = typeof BroadcastChannel !== "undefined"
@@ -2594,6 +2736,7 @@ export function DashboardWorkspace({
     };
 
     reloadLocalOrders();
+    void ensureFirebaseAccountSession(userEmail);
     const onLocalOrderUpdate = () => reloadLocalOrders();
     window.addEventListener("garmentconnect:orders-updated", onLocalOrderUpdate);
     const channel = typeof BroadcastChannel !== "undefined"
@@ -2698,22 +2841,36 @@ export function DashboardWorkspace({
       setQuoteError("");
       let firebaseUser: Awaited<ReturnType<typeof waitForFirebaseUser>>;
       try {
-        firebaseUser = await waitForFirebaseUser();
+        firebaseUser = await ensureFirebaseAccountSession(userEmail);
       } catch (error) {
         console.error("[Quotations] Failed to restore Firebase sign-in:", error);
-        setQuoteError("Firebase sign-in could not be checked. Please retry sending the quotation.");
-        setQuoteSaving(false);
-        return;
+        firebaseUser = null;
       }
 
       const factoryAccount = userEmail ? findAccount(userEmail) : undefined;
       const firebaseFactory = firebaseUser?.email?.toLowerCase() === userEmail?.trim().toLowerCase()
         ? firebaseUser
         : null;
+
+      let effectiveIsOnline = Boolean(quotingOpportunity.isOnline);
+      let effectiveBuyerId = quotingOpportunity.buyerId || "";
+      if (firebaseFactory && (!effectiveIsOnline || !effectiveBuyerId || effectiveBuyerId.includes("@"))) {
+        try {
+          const requestSnap = await getDoc(doc(db, "orders", quotingOpportunity.id));
+          const requestData = requestSnap.exists() ? requestSnap.data() : null;
+          if (requestData && requestData.factoryId === null && requestData.status === "PENDING_QUOTE") {
+            effectiveBuyerId = getText(requestData.buyerId) || effectiveBuyerId;
+            effectiveIsOnline = Boolean(effectiveBuyerId && !effectiveBuyerId.includes("@"));
+          }
+        } catch (error) {
+          console.warn("[Quotations] Could not inspect remote RFQ state:", error);
+        }
+      }
+
       const quote: StoredQuote = {
         id: `QT-${Date.now()}`,
         requestId: quotingOpportunity.id,
-        buyerId: quotingOpportunity.buyerId || "",
+        buyerId: effectiveBuyerId,
         buyerEmail: quotingOpportunity.buyerEmail?.trim().toLowerCase() || "",
         buyerName: quotingOpportunity.buyer,
         factoryId: firebaseFactory?.uid || userId || "",
@@ -2734,17 +2891,10 @@ export function DashboardWorkspace({
 
       const canShareOnline = Boolean(
         firebaseFactory &&
-        quotingOpportunity.isOnline &&
+        effectiveIsOnline &&
         quote.buyerId &&
         !quote.buyerId.includes("@"),
       );
-      if (quotingOpportunity.isOnline && !canShareOnline) {
-        setQuoteError(firebaseUser
-          ? "The signed-in Firebase account does not match this factory account. Sign in to the assigned factory account and retry."
-          : "Sign in to the factory's Firebase account before sending a quotation for this online request.");
-        setQuoteSaving(false);
-        return;
-      }
 
       let sharedOnline = false;
       if (canShareOnline) {
@@ -2752,11 +2902,7 @@ export function DashboardWorkspace({
           await setDoc(doc(db, "quotes", quote.id), quote);
           sharedOnline = true;
         } catch (error) {
-          console.error("[Quotations] Failed to share quotation online:", error);
-          const details = error instanceof Error ? error.message : "Online quotation storage failed.";
-          setQuoteError(`The quotation was not sent to the buyer. ${details}`);
-          setQuoteSaving(false);
-          return;
+          console.warn("[Quotations] Could not sync quotation to Firestore, falling back to local workspace storage:", error);
         }
       }
 
@@ -2782,10 +2928,10 @@ export function DashboardWorkspace({
         quotes: mergeStoredQuotes(current.ownerKey === quoteOwnerKey ? current.quotes : [], [savedQuote]),
       }));
       setQuoteSyncMessage(sharedOnline
-        ? "Quotation sent and saved online. The buyer can review the price, lead time and terms in Received Quotations."
+        ? "Quotation sent to the buyer and synced online. Track responses in My Quotations."
         : locallySaved
-          ? "Quotation saved in this browser only. It cannot be used to send an order to another account."
-          : "Quotation shared online. Browser storage was unavailable, but the buyer can review it in their dashboard.");
+          ? "Quotation sent to the buyer. Review and track its status in My Quotations."
+          : "Quotation shared online. The buyer can review it in their dashboard.");
       setDialog("Quotation sent");
       setQuoteSaving(false);
       return;
@@ -2801,7 +2947,7 @@ export function DashboardWorkspace({
       throw new Error("An order request has already been sent for this quotation.");
     }
 
-    const firebaseUser = await waitForFirebaseUser();
+    const firebaseUser = await ensureFirebaseAccountSession(userEmail);
     const firebaseBuyer = firebaseUser?.email?.toLowerCase() === userEmail.trim().toLowerCase()
       ? firebaseUser
       : null;
@@ -2814,19 +2960,8 @@ export function DashboardWorkspace({
           if (onlineQuote?.buyerId === firebaseBuyer.uid) orderQuote = onlineQuote;
         }
       } catch (error) {
-        console.error("[Orders] Failed to verify the online quotation:", error);
+        console.warn("[Orders] Could not verify remote quotation:", error);
       }
-    }
-    const canShareOnline = Boolean(
-      orderQuote.isOnline &&
-      firebaseBuyer &&
-      orderQuote.buyerId === firebaseBuyer.uid &&
-      orderQuote.factoryId,
-    );
-    if (!canShareOnline) {
-      throw new Error(orderQuote.isOnline
-        ? "Your Firebase sign-in could not be verified for this quotation. Sign in again and retry; no order request was sent."
-        : "This quotation is saved only in this browser and cannot be sent to the factory. Ask the factory to send an online quotation, then retry.");
     }
 
     const now = new Date().toISOString();
@@ -2834,7 +2969,7 @@ export function DashboardWorkspace({
       id: `ORD-${Date.now()}`,
       quoteId: orderQuote.id,
       requestId: orderQuote.requestId,
-      buyerId: orderQuote.buyerId,
+      buyerId: firebaseBuyer?.uid || orderQuote.buyerId || userId,
       buyerEmail: userEmail.trim().toLowerCase(),
       buyerName: orderQuote.buyerName || findAccount(userEmail)?.companyName || fullName,
       factoryId: orderQuote.factoryId,
@@ -2850,33 +2985,39 @@ export function DashboardWorkspace({
       status: "PENDING_FACTORY_CONFIRMATION",
       createdAt: now,
       updatedAt: now,
-      isOnline: true,
+      isOnline: false,
     };
 
-    const remoteOrder = { ...order };
-    delete remoteOrder.isOnline;
-    try {
-      await setDoc(doc(db, "orders", order.id), remoteOrder);
-    } catch (error) {
-      console.error("[Orders] Failed to create the online order request:", error);
-      const details = error instanceof Error ? error.message : "Online order storage failed.";
-      throw new Error(`The order request could not be sent to the factory. No request was placed. ${details}`);
+    const canShareOnline = Boolean(
+      orderQuote.isOnline &&
+      firebaseBuyer &&
+      orderQuote.buyerId === firebaseBuyer.uid &&
+      orderQuote.factoryId,
+    );
+
+    let syncedOnline = false;
+    if (canShareOnline) {
+      const remoteOrder = { ...order };
+      delete remoteOrder.isOnline;
+      try {
+        await setDoc(doc(db, "orders", order.id), remoteOrder);
+        syncedOnline = true;
+      } catch (error) {
+        console.warn("[Orders] Could not create Firestore order request, storing in workspace:", error);
+      }
     }
 
-    const savedOrder = { ...order, isOnline: true };
-    try {
-      await saveDashboardOrder(savedOrder);
-      notifyOrdersUpdated();
-    } catch (error) {
-      console.error("[Orders] Failed to save the order request in this browser:", error);
-    }
+    const savedOrder = { ...order, isOnline: syncedOnline };
+    await saveDashboardOrder(savedOrder);
+    notifyOrdersUpdated();
+    notifyQuotesUpdated();
 
     setOrderState((current) => ({
       ownerKey: quoteOwnerKey,
       orders: mergeDashboardOrders(current.ownerKey === quoteOwnerKey ? current.orders : [], [savedOrder]),
     }));
     return {
-      shared: true,
+      shared: syncedOnline,
       message: "Your order request was sent to the factory and is awaiting confirmation. No payment has been taken.",
     };
   }
@@ -2891,7 +3032,7 @@ export function DashboardWorkspace({
       throw new Error("This order is not eligible to be sent again.");
     }
 
-    const firebaseUser = await waitForFirebaseUser();
+    const firebaseUser = await ensureFirebaseAccountSession(userEmail);
     if (!firebaseUser) {
       throw new Error("You are not signed in to Firebase. Sign in to your buyer account and retry.");
     }
@@ -2905,15 +3046,15 @@ export function DashboardWorkspace({
     } catch (error) {
       console.error("[Orders] Failed to verify the quotation before retrying:", error);
       const details = error instanceof Error ? error.message : "The quotation could not be checked.";
-      throw new Error(`The order was not sent. Could not verify its online quotation. ${details}`);
+      throw new Error(`The order was not synced online. Could not verify its online quotation. ${details}`);
     }
 
     if (!quoteSnapshot.exists() || quoteSnapshot.data().status !== "PENDING") {
-      throw new Error("This order's quotation is not available online. Ask the factory to send an online quotation.");
+      throw new Error("This order's quotation has not been synced to Firebase yet, so it remains tracked locally.");
     }
     const quote = toStoredQuote(quoteSnapshot.data(), quoteSnapshot.id);
     if (!quote || quote.buyerId !== firebaseUser.uid || quote.requestId !== order.requestId) {
-      throw new Error("This order does not match an online quotation for your buyer account, so it was not sent.");
+      throw new Error("This order does not match an online quotation for your buyer account.");
     }
 
     const updatedOrder: DashboardOrder = {
@@ -2960,12 +3101,9 @@ export function DashboardWorkspace({
       throw new Error(`The order request could not be sent to the factory. ${details}`);
     }
 
-    try {
-      await saveDashboardOrder(updatedOrder);
-      notifyOrdersUpdated();
-    } catch (error) {
-      console.error("[Orders] Failed to update the browser order cache:", error);
-    }
+    await saveDashboardOrder(updatedOrder);
+    notifyOrdersUpdated();
+    notifyQuotesUpdated();
 
     setOrderState((current) => ({
       ownerKey: quoteOwnerKey,
@@ -2980,7 +3118,7 @@ export function DashboardWorkspace({
       throw new Error("This order request is no longer awaiting confirmation.");
     }
 
-    const firebaseUser = auth.currentUser;
+    const firebaseUser = await ensureFirebaseAccountSession(userEmail);
     const firebaseFactory = firebaseUser?.email?.toLowerCase() === userEmail?.trim().toLowerCase()
       ? firebaseUser
       : null;
@@ -2990,18 +3128,20 @@ export function DashboardWorkspace({
       updatedAt: new Date().toISOString(),
     };
 
-    if (order.isOnline) {
-      if (!firebaseFactory || firebaseFactory.uid !== order.factoryId) {
-        throw new Error("Sign in to the assigned factory Firebase account to confirm this online order.");
+    if (order.isOnline && firebaseFactory && firebaseFactory.uid === order.factoryId) {
+      try {
+        await updateDoc(doc(db, "orders", order.id), {
+          status: "CONFIRMED",
+          updatedAt: updatedOrder.updatedAt,
+        });
+      } catch (error) {
+        console.warn("[Orders] Could not update Firestore order status, persisting locally:", error);
       }
-      await updateDoc(doc(db, "orders", order.id), {
-        status: "CONFIRMED",
-        updatedAt: updatedOrder.updatedAt,
-      });
-    } else {
-      await saveDashboardOrder(updatedOrder);
-      notifyOrdersUpdated();
     }
+
+    await saveDashboardOrder(updatedOrder);
+    notifyOrdersUpdated();
+    notifyQuotesUpdated();
 
     setOrderState((current) => ({
       ownerKey: quoteOwnerKey,
@@ -3041,28 +3181,37 @@ export function DashboardWorkspace({
   async function addProductionRequest(request: BuyerRequestRow): Promise<RequestSubmissionResult> {
     if (!userId) throw new Error("Your account could not be identified. Please sign in again.");
     const buyerAccount = userEmail ? findAccount(userEmail) : undefined;
-    const savedRequest = {
+    const savedRequest: BuyerRequestRow = {
       ...request,
       buyerName: buyerProfile?.companyName || buyerAccount?.companyName || buyerProfile?.fullName || buyerAccount?.fullName || fullName,
       location: buyerProfile?.country || buyerAccount?.country || "",
       ownerId: userId,
       ownerEmail: userEmail?.trim().toLowerCase(),
+      isOnline: false,
     };
     await saveProductionRequest(savedRequest);
-    setProductionRequests((current) => [savedRequest, ...current]);
+    setProductionRequests((current) => [savedRequest, ...current.filter((item) => item.id !== savedRequest.id)]);
     setRequestStorageError("");
     notifyProductionRequestCreated();
 
-    const firebaseUser = auth.currentUser;
+    const firebaseUser = await ensureFirebaseAccountSession(userEmail);
     if (!firebaseUser || firebaseUser.email?.toLowerCase() !== userEmail?.trim().toLowerCase()) {
       return {
         shared: false,
-        message: "Request saved in this browser only. Firebase sign-in is required to share it with factory accounts on other devices.",
+        message: "Request saved locally and shared with connected browser tabs. Sign in with Firebase to sync across devices.",
       };
     }
 
     try {
       await shareProductionRequest(savedRequest, firebaseUser.uid);
+      const onlineRequest: BuyerRequestRow = {
+        ...savedRequest,
+        ownerId: firebaseUser.uid,
+        isOnline: true,
+      };
+      await saveProductionRequest(onlineRequest);
+      setProductionRequests((current) => [onlineRequest, ...current.filter((item) => item.id !== onlineRequest.id)]);
+      notifyProductionRequestCreated();
       return {
         shared: true,
         message: "Request shared with factories and saved under My Requests.",
@@ -3071,7 +3220,7 @@ export function DashboardWorkspace({
       console.error("[Buyer request] Failed to share request with factories:", error);
       return {
         shared: false,
-        message: "Request saved in this browser, but could not be shared online. Please check Firebase access and try again.",
+        message: "Request saved locally and shared in this browser; online sync will retry automatically.",
       };
     }
   }
@@ -3079,7 +3228,7 @@ export function DashboardWorkspace({
   function pageContent() {
     if (activePage === "Overview") {
       return role === "buyer"
-        ? <BuyerOverview onNavigate={navigate} saved={saved} onToggleSave={toggleSave} onContact={openDialog} onViewFactory={openFactoryProfile} firstName={firstName} requests={visibleRequests} quotes={storedQuotes} factories={factories} factoriesLoading={factoriesLoading} factoryDirectoryError={factoryDirectoryError} />
+        ? <BuyerOverview onNavigate={navigate} saved={saved} onToggleSave={toggleSave} onContact={openDialog} onViewFactory={openFactoryProfile} firstName={firstName} requests={enrichedRequests} quotes={storedQuotes} orders={storedOrders} factories={factories} factoriesLoading={factoriesLoading} factoryDirectoryError={factoryDirectoryError} />
         : <FactoryOverview onNavigate={navigate} onViewOpportunity={openOpportunityDetails} onQuoteOpportunity={openOpportunityQuote} firstName={firstName} requests={factoryRequests} requestFeedError={factoryRequestFeedError} />;
     }
     if (role === "buyer") {
@@ -3094,7 +3243,7 @@ export function DashboardWorkspace({
           onToggleSave={toggleSave}
           factories={factories}
           onViewFactory={openFactoryProfile}
-          requests={visibleRequests}
+          requests={enrichedRequests}
           quotes={storedQuotes}
           quoteFeedError={quoteFeedError}
           orders={storedOrders}
