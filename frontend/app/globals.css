@@ -1920,18 +1920,25 @@ a {
   z-index: 20;
   inset: 0 auto 0 0;
   width: 252px;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding: 21px 14px 12px;
+  padding: 16px 14px 10px;
   border-right: 1px solid #e8edef;
   background: #fff;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
 }
 
 .sidebar-brand-wrap {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 10px 21px;
+  padding: 0 10px 14px;
 }
 
 .workspace-brand {
@@ -1967,12 +1974,13 @@ a {
 }
 
 .workspace-switch {
-  min-height: 58px;
+  flex-shrink: 0;
+  min-height: 52px;
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 0 2px 24px;
-  padding: 9px;
+  margin: 0 2px 15px;
+  padding: 8px 9px;
   border: 1px solid #e9efed;
   border-radius: 10px;
   background: #fbfcfc;
@@ -2027,7 +2035,8 @@ a {
 }
 
 .sidebar-label {
-  padding: 0 12px 9px;
+  flex-shrink: 0;
+  padding: 0 12px 7px;
   color: #a4afb3;
   font-size: 13px;
   font-weight: 750;
@@ -2035,18 +2044,55 @@ a {
 }
 
 .sidebar-nav {
+  flex: 1 1 auto;
+  min-height: min(200px, 34dvh);
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  margin: 0 -14px;
+  padding: 2px 10px 10px 14px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(130, 144, 155, 0.38) transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track,
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb,
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(130, 144, 155, 0.38);
+}
+
+.sidebar-nav:hover::-webkit-scrollbar-thumb,
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgba(130, 144, 155, 0.62);
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
 }
 
 .sidebar-link {
   position: relative;
-  min-height: 39px;
+  flex-shrink: 0;
+  min-height: 36px;
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 0 11px;
+  padding: 6px 11px;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -2081,8 +2127,8 @@ a {
 
 .sidebar-link-active::before {
   position: absolute;
-  top: 8px;
-  bottom: 8px;
+  top: 7px;
+  bottom: 7px;
   left: -14px;
   width: 3px;
   border-radius: 0 4px 4px 0;
@@ -2106,7 +2152,9 @@ a {
 }
 
 .sidebar-bottom {
+  flex-shrink: 0;
   margin-top: auto;
+  padding-top: 8px;
 }
 
 .help-card {
@@ -2114,8 +2162,8 @@ a {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  margin: 0 3px 13px;
-  padding: 13px;
+  margin: 0 3px 10px;
+  padding: 11px 12px;
   border: 1px solid #e9efed;
   border-radius: 10px;
   background: #fafcfb;
@@ -5090,6 +5138,8 @@ a {
 .workspace-modal {
   position: relative;
   width: min(100%, 420px);
+  max-height: min(90dvh, 780px);
+  overflow-y: auto;
   padding: 25px;
   border: 1px solid #e7eeeb;
   border-radius: 13px;
@@ -5292,14 +5342,18 @@ a {
   }
 
   .sidebar-nav {
-    width: 100%;
+    width: auto;
     align-items: center;
     gap: 5px;
+    margin: 0 -9px;
+    padding: 2px 9px 10px;
   }
 
   .sidebar-link {
     width: 43px;
     height: 41px;
+    min-height: 41px;
+    flex-shrink: 0;
     justify-content: center;
     padding: 0;
     font-size: 0;
@@ -5419,14 +5473,17 @@ a {
 
   .sidebar-nav {
     align-items: stretch;
+    margin: 0 -14px;
+    padding: 2px 14px 10px;
   }
 
   .sidebar-link {
     width: 100%;
     height: auto;
-    min-height: 39px;
+    min-height: 38px;
+    flex-shrink: 0;
     justify-content: flex-start;
-    padding: 0 11px;
+    padding: 6px 11px;
     font-size: 14px;
   }
 
