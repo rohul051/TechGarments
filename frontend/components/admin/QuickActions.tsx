@@ -10,7 +10,7 @@ import {
   ArrowRight,
   type LucideIcon,
 } from "lucide-react";
-import { adminQuickActions } from "@/lib/adminMockData";
+import { useAdminData } from "./AdminDataContext";
 
 const quickActionIcons: Record<string, LucideIcon> = {
   BadgeCheck,
@@ -21,19 +21,21 @@ const quickActionIcons: Record<string, LucideIcon> = {
 };
 
 export function QuickActions() {
+  const { quickActions } = useAdminData();
+
   return (
     <div className="p-6 bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
       <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100">
         <div>
           <h2 className="text-base font-bold text-[#102B46]">Administrative Quick Actions</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Direct operational shortcuts to priority queue management workflows.
+            Direct operational shortcuts reflecting real-time buyer and factory activity.
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-        {adminQuickActions.map((action) => {
+        {quickActions.map((action) => {
           const Icon = quickActionIcons[action.iconName] || BadgeCheck;
 
           return (

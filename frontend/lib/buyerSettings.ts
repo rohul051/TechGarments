@@ -8,9 +8,16 @@ export const BUYER_TYPE_OPTIONS = [
   'Individual / Startup',
 ] as const;
 
-export function getBuyerThemeStorageKey(email?: string): string {
+export type WorkspaceThemeRole = 'buyer' | 'factory' | 'admin';
+
+export function getWorkspaceThemeStorageKey(role: WorkspaceThemeRole, email?: string): string {
   const clean = email?.trim().toLowerCase();
-  return clean ? `techgarments_buyer_theme_${clean}` : 'techgarments_buyer_theme';
+  const base = `techgarments_${role}_theme`;
+  return clean ? `${base}_${clean}` : base;
+}
+
+export function getBuyerThemeStorageKey(email?: string): string {
+  return getWorkspaceThemeStorageKey('buyer', email);
 }
 
 export function getBuyerSavedStorageKey(email?: string): string {
@@ -23,26 +30,43 @@ export function getBuyerNotificationsStorageKey(email?: string): string {
   return clean ? `techgarments_buyer_notifications_${clean}` : 'techgarments_buyer_notifications';
 }
 
-export function loadSavedBuyerTheme(email?: string): BuyerTheme {
+export function getFactoryNotificationsStorageKey(email?: string): string {
+  const clean = email?.trim().toLowerCase();
+  return clean ? `techgarments_factory_notifications_${clean}` : 'techgarments_factory_notifications';
+}
+
+export function loadSavedWorkspaceTheme(role: WorkspaceThemeRole, email?: string): BuyerTheme {
   if (typeof window === 'undefined') return 'default';
   try {
     const raw =
-      localStorage.getItem(getBuyerThemeStorageKey(email)) ||
-      localStorage.getItem('techgarments_buyer_theme');
+      localStorage.getItem(getWorkspaceThemeStorageKey(role, email)) ||
+      localStorage.getItem(`techgarments_${role}_theme`);
     return raw === 'dark' || raw === 'light' || raw === 'default' ? raw : 'default';
   } catch {
     return 'default';
   }
 }
 
-export function persistBuyerTheme(theme: BuyerTheme, email?: string): void {
+export function persistWorkspaceTheme(
+  role: WorkspaceThemeRole,
+  theme: BuyerTheme,
+  email?: string,
+): void {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem(getBuyerThemeStorageKey(email), theme);
-    localStorage.setItem('techgarments_buyer_theme', theme);
+    localStorage.setItem(getWorkspaceThemeStorageKey(role, email), theme);
+    localStorage.setItem(`techgarments_${role}_theme`, theme);
   } catch (error) {
-    console.warn('[Buyer theme] Failed to save theme locally:', error);
+    console.warn(`[${role} theme] Failed to save theme locally:`, error);
   }
+}
+
+export function loadSavedBuyerTheme(email?: string): BuyerTheme {
+  return loadSavedWorkspaceTheme('buyer', email);
+}
+
+export function persistBuyerTheme(theme: BuyerTheme, email?: string): void {
+  persistWorkspaceTheme('buyer', theme, email);
 }
 
 export function loadBuyerSavedFactories(email?: string): string[] {
@@ -92,11 +116,12 @@ export function normalizeWebsiteUrl(raw: string): { valid: boolean; value: strin
   }
 }
 
-/**
- * Resizes and compresses a selected image file into a compact Data URL
- * suitable for immediate preview, localStorage, and Firestore profile documents.
- */
-export function compressProfilePicture(file: File): Promise<string> {
+function compressImageDataUrl(
+  file: File,
+  maxSize: number,
+  quality: number,
+  maxLength: number,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     if (!file.type.startsWith('image/')) {
       reject(new Error('Please select a valid image file (PNG, JPG, WebP, or GIF).'));
@@ -111,7 +136,6 @@ export function compressProfilePicture(file: File): Promise<string> {
     const img = new Image();
     img.onload = () => {
       try {
-        const maxSize = 256;
         const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
         const width = Math.max(1, Math.round(img.width * scale));
         const height = Math.max(1, Math.round(img.height * scale));
@@ -127,15 +151,15 @@ export function compressProfilePicture(file: File): Promise<string> {
         }
         ctx.drawImage(img, 0, 0, width, height);
 
-        let dataUrl = canvas.toDataURL('image/webp', 0.86);
-        if (!dataUrl.startsWith('data:image/webp') || dataUrl.length > 180_000) {
-          dataUrl = canvas.toDataURL('image/jpeg', 0.84);
+        let dataUrl = canvas.toDataURL('image/webp', quality);
+        if (!dataUrl.startsWith('data:image/webp') || dataUrl.length > maxLength) {
+          dataUrl = canvas.toDataURL('image/jpeg', Math.min(0.84, quality));
         }
         URL.revokeObjectURL(objectUrl);
         resolve(dataUrl);
       } catch (error) {
         URL.revokeObjectURL(objectUrl);
-        reject(error instanceof Error ? error : new Error('Failed to process profile picture.'));
+        reject(error instanceof Error ? error : new Error('Failed to process selected image.'));
       }
     };
     img.onerror = () => {
@@ -144,6 +168,21 @@ export function compressProfilePicture(file: File): Promise<string> {
     };
     img.src = objectUrl;
   });
+}
+
+/**
+ * Resizes and compresses a selected image file into a compact Data URL
+ * suitable for immediate preview, localStorage, and Firestore profile documents.
+ */
+export function compressProfilePicture(file: File): Promise<string> {
+  return compressImageDataUrl(file, 256, 0.86, 180_000);
+}
+
+/**
+ * Resizes and compresses a wide background cover banner image for factory profiles.
+ */
+export function compressCoverImage(file: File): Promise<string> {
+  return compressImageDataUrl(file, 1280, 0.84, 380_000);
 }
 
 function clearStoreRecordsForBuyer(
@@ -195,6 +234,25 @@ function clearStoreRecordsForBuyer(
     };
     request.onerror = () => resolve();
   });
+}
+
+export async function clearFactoryIndexedDbData(factoryId: string, factoryEmail: string): Promise<void> {
+  const cleanEmail = factoryEmail.trim().toLowerCase();
+  await Promise.all([
+    clearStoreRecordsForBuyer('garmentconnect-production-quotes', 'quotes', (rec) =>
+      rec.factoryId === factoryId ||
+      (typeof rec.factoryEmail === 'string' && rec.factoryEmail.toLowerCase() === cleanEmail),
+    ),
+    clearStoreRecordsForBuyer('garmentconnect-orders', 'orders', (rec) =>
+      rec.factoryId === factoryId ||
+      (typeof rec.factoryEmail === 'string' && rec.factoryEmail.toLowerCase() === cleanEmail),
+    ),
+  ]);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('garmentconnect:quotes-updated'));
+    window.dispatchEvent(new Event('garmentconnect:orders-updated'));
+  }
 }
 
 export async function clearBuyerIndexedDbData(buyerId: string, buyerEmail: string): Promise<void> {

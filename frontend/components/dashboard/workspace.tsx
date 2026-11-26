@@ -13,6 +13,7 @@ import {
   BriefcaseBusiness,
   Building2,
   CalendarDays,
+  Camera,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -29,6 +30,7 @@ import {
   Filter,
   Gauge,
   Heart,
+  ImagePlus,
   LayoutDashboard,
   LogOut,
   Mail,
@@ -45,16 +47,18 @@ import {
   SlidersHorizontal,
   Sparkles,
   Star,
+  Trash2,
   Upload,
   Users,
   X,
   type LucideIcon,
 } from "lucide-react";
 import { ensureFirebaseAccountSession, findAccount, getRegisteredAccounts, waitForFirebaseUser } from "@/lib/auth";
-import { loadBuyerSavedFactories, persistBuyerSavedFactories } from "@/lib/buyerSettings";
+import { compressCoverImage, loadBuyerSavedFactories, persistBuyerSavedFactories } from "@/lib/buyerSettings";
 import { auth, db } from "@/lib/firebase";
 import type { BuyerProfileDetails, BuyerTheme, FactoryProfileDetails } from "@/types/user";
 import { BuyerSettingsPage } from "./BuyerSettingsPage";
+import { FactorySettingsPage } from "./FactorySettingsPage";
 
 export type DashboardRole = "buyer" | "factory";
 
@@ -187,6 +191,7 @@ type FactoryDirectoryRecord = {
   processes?: unknown;
   products?: unknown;
   website?: unknown;
+  coverPhotoURL?: unknown;
   verified?: unknown;
 };
 
@@ -220,7 +225,7 @@ function toFactoryCard(profile: FactoryDirectoryRecord, documentId: string): Fac
     monthlyCapacity: Number.isFinite(parsedCapacity) && parsedCapacity > 0 ? parsedCapacity : null,
     processes: getStringList(profile.processes),
     products: getStringList(profile.products),
-    image: genericFactoryImage,
+    image: getText(profile.coverPhotoURL) || genericFactoryImage,
     website: getText(profile.website),
     verified: profile.verified === true,
   };
@@ -246,15 +251,16 @@ function mergeFactoryCards(remoteFactories: FactoryCard[], localFactories: Facto
     const remoteFactory = factories.get(key);
     factories.set(key, remoteFactory
       ? {
-          ...remoteFactory,
-          name: factory.name || remoteFactory.name,
-          city: factory.city || remoteFactory.city,
-          country: factory.country || remoteFactory.country,
-          monthlyCapacity: factory.monthlyCapacity ?? remoteFactory.monthlyCapacity,
-          processes: factory.processes.length ? factory.processes : remoteFactory.processes,
-          products: factory.products.length ? factory.products : remoteFactory.products,
-          website: factory.website || remoteFactory.website,
-        }
+        ...remoteFactory,
+        name: factory.name || remoteFactory.name,
+        city: factory.city || remoteFactory.city,
+        country: factory.country || remoteFactory.country,
+        monthlyCapacity: factory.monthlyCapacity ?? remoteFactory.monthlyCapacity,
+        processes: factory.processes.length ? factory.processes : remoteFactory.processes,
+        products: factory.products.length ? factory.products : remoteFactory.products,
+        image: factory.image !== genericFactoryImage ? factory.image : remoteFactory.image,
+        website: factory.website || remoteFactory.website,
+      }
       : factory);
   }
   return [...factories.values()];
@@ -352,22 +358,84 @@ const factoryNav: NavItem[] = [
   { label: "Settings", icon: Settings },
 ];
 
-const buyerStats = [
-  { label: "Active requests", value: "08", change: "+2 this week", icon: ClipboardList, color: "mint", trend: "up" },
-  { label: "Received quotations", value: "24", change: "6 awaiting review", icon: FileText, color: "blue", trend: "up" },
-  { label: "Active orders", value: "03", change: "On track", icon: Package, color: "violet", trend: "steady" },
-  { label: "AI matched factories", value: "16", change: "New matches today", icon: SparkIcon, color: "amber", trend: "up" },
-];
+type StatCardItem = {
+  label: string;
+  value: string;
+  suffix?: string;
+  change: string;
+  icon: LucideIcon;
+  color: string;
+  trend: string;
+};
 
-const factoryStats = [
-  { label: "Monthly capacity", value: "120k", suffix: "pcs", change: "Across 3 product lines", icon: Gauge, color: "mint", trend: "steady" },
-  { label: "Available capacity", value: "38k", suffix: "pcs", change: "32% of total capacity", icon: Activity, color: "blue", trend: "up" },
-  { label: "New buyer requests", value: "12", change: "4 match your capabilities", icon: Mail, color: "amber", trend: "up" },
-  { label: "Active orders", value: "07", change: "2 due this month", icon: Package, color: "violet", trend: "steady" },
-];
+function formatWorkspaceDate(date = new Date()): string {
+  return date
+    .toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    })
+    .toUpperCase();
+}
 
-function SparkIcon(props: React.ComponentProps<typeof Star>) {
-  return <Star {...props} />;
+function getTimeGreeting(date = new Date()): string {
+  const hour = date.getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+function parseOrderUnits(quantityText: string): number {
+  const digits = Number(quantityText.replace(/[^\d]/g, ""));
+  return Number.isFinite(digits) && digits > 0 ? digits : 0;
+}
+
+function formatCompactPcs(value: number): string {
+  if (value >= 10_000 && value % 1000 === 0) {
+    return `${value / 1000}k`;
+  }
+  return value.toLocaleString();
+}
+
+function computeFactoryCapacityMetrics(
+  factoryProfile: FactoryProfileDetails | undefined,
+  orders: DashboardOrder[],
+) {
+  const totalCapacity = factoryProfile?.monthlyCapacity && factoryProfile.monthlyCapacity > 0
+    ? factoryProfile.monthlyCapacity
+    : 120_000;
+  const confirmedOrders = orders.filter((order) => order.status === "CONFIRMED");
+  const pendingOrders = orders.filter((order) => order.status === "PENDING_FACTORY_CONFIRMATION");
+  const activeOrders = orders.filter((order) => order.status !== "CANCELLED");
+  const bookedUnits = confirmedOrders.reduce((sum, order) => sum + parseOrderUnits(order.quantity), 0);
+  const availableUnits = Math.max(totalCapacity - bookedUnits, 0);
+  const bookedPct = totalCapacity > 0 ? Math.min(100, Math.round((bookedUnits / totalCapacity) * 100)) : 0;
+  const availablePct = Math.max(0, 100 - bookedPct);
+  return {
+    totalCapacity,
+    bookedUnits,
+    availableUnits,
+    bookedPct,
+    availablePct,
+    confirmedOrders,
+    pendingOrders,
+    activeOrders,
+  };
+}
+
+function matchesFactoryCapabilities(
+  request: FactoryOpportunity,
+  factoryProfile?: FactoryProfileDetails,
+): boolean {
+  if (!factoryProfile) return false;
+  const categoryOrProduct = `${request.category || ""} ${request.product}`.toLowerCase();
+  const productMatch = factoryProfile.products.some((item) => categoryOrProduct.includes(item.toLowerCase()));
+  const requestProcesses = (request.processes || []).map((item) => item.toLowerCase());
+  const processMatch = factoryProfile.processes.some((item) =>
+    requestProcesses.includes(item.toLowerCase()),
+  );
+  return productMatch || processMatch;
 }
 
 const requestRows: BuyerRequestRow[] = [
@@ -758,7 +826,7 @@ function toDashboardOrder(data: Record<string, unknown>, documentId: string): Da
   const status = getText(data.status);
   const pricePerUnit = Number(data.pricePerUnit);
   if (!quoteId || !requestId || !Number.isFinite(pricePerUnit) || pricePerUnit <= 0 ||
-      !["PENDING_FACTORY_CONFIRMATION", "CONFIRMED", "CANCELLED"].includes(status)) return null;
+    !["PENDING_FACTORY_CONFIRMATION", "CONFIRMED", "CANCELLED"].includes(status)) return null;
   return {
     id: documentId,
     quoteId,
@@ -859,7 +927,7 @@ function SectionHeading({
   );
 }
 
-function StatCard({ stat }: { stat: (typeof buyerStats)[number] | (typeof factoryStats)[number] }) {
+function StatCard({ stat }: { stat: StatCardItem }) {
   const Icon = stat.icon;
   const trend = stat.trend;
   return (
@@ -871,7 +939,7 @@ function StatCard({ stat }: { stat: (typeof buyerStats)[number] | (typeof factor
       <span className="stat-label">{stat.label}</span>
       <div className="stat-value-line">
         <strong>{stat.value}</strong>
-        {"suffix" in stat && <span>{stat.suffix}</span>}
+        {stat.suffix && <span>{stat.suffix}</span>}
       </div>
       <div className={`stat-change ${trend === "up" ? "change-up" : ""}`}>
         {trend === "up" ? <ArrowUpRight size={13} /> : <CheckCircle2 size={13} />}
@@ -930,8 +998,8 @@ function FactoryCardView({
           {onMessage
             ? <button className="contact-factory-button" onClick={onMessage}><MessageSquare size={14} /> Contact</button>
             : <button className={`save-factory ${saved ? "saved" : ""}`} onClick={onSave} aria-label={saved ? "Remove saved factory" : "Save factory"}>
-                {saved ? <Heart size={16} fill="currentColor" /> : <Bookmark size={16} />}
-              </button>}
+              {saved ? <Heart size={16} fill="currentColor" /> : <Bookmark size={16} />}
+            </button>}
         </div>
       </div>
     </article>
@@ -996,31 +1064,84 @@ function BuyerOverview({
   factoriesLoading: boolean;
   factoryDirectoryError: string;
 }) {
-  const liveOrderCards = orders
-    .filter((order) => order.status !== "CANCELLED")
-    .map((order) => ({
-      id: order.id,
-      product: order.product,
-      quantity: order.quantity,
-      date: order.targetDeliveryDate || "Not specified",
-      progress: order.status === "CONFIRMED" ? 25 : 5,
-      status: order.status === "CONFIRMED" ? "Confirmed" : "Awaiting factory confirmation",
-      tone: order.status === "CONFIRMED" ? "teal" : "amber",
-    }));
+  const todayLabel = formatWorkspaceDate();
+  const greeting = getTimeGreeting();
+  const realRequests = requests.filter((row) => !row.id.startsWith("RFQ-"));
+  const activeOrders = orders.filter((order) => order.status !== "CANCELLED");
+  const confirmedOrdersCount = activeOrders.filter((order) => order.status === "CONFIRMED").length;
+  const pendingOrdersCount = activeOrders.filter((order) => order.status === "PENDING_FACTORY_CONFIRMATION").length;
+  const quotedRequestsCount = realRequests.filter((row) =>
+    row.status === "Quotations received" || row.status === "Order requested" || row.status === "Order confirmed",
+  ).length;
+  const openQuotesCount = quotes.filter((quote) =>
+    !activeOrders.some((order) => order.quoteId === quote.id),
+  ).length;
+  const verifiedFactoriesCount = factories.filter((factory) => factory.verified).length;
+
+  const liveBuyerStats: StatCardItem[] = [
+    {
+      label: "Active requests",
+      value: String(realRequests.length).padStart(2, "0"),
+      change: realRequests.length ? `${quotedRequestsCount} with responses` : "Post a production request",
+      icon: ClipboardList,
+      color: "mint",
+      trend: realRequests.length > 0 ? "up" : "steady",
+    },
+    {
+      label: "Received quotations",
+      value: String(quotes.length).padStart(2, "0"),
+      change: quotes.length ? `${openQuotesCount} awaiting decision` : "No live quotes yet",
+      icon: FileText,
+      color: "blue",
+      trend: quotes.length > 0 ? "up" : "steady",
+    },
+    {
+      label: "Active orders",
+      value: String(activeOrders.length).padStart(2, "0"),
+      change: activeOrders.length
+        ? `${confirmedOrdersCount} confirmed · ${pendingOrdersCount} awaiting`
+        : "No active orders yet",
+      icon: Package,
+      color: "violet",
+      trend: activeOrders.length > 0 ? "up" : "steady",
+    },
+    {
+      label: "Registered factories",
+      value: String(factories.length).padStart(2, "0"),
+      change: factoriesLoading
+        ? "Syncing directory..."
+        : verifiedFactoriesCount > 0
+          ? `${verifiedFactoriesCount} verified partners`
+          : "Explore factory profiles",
+      icon: Star,
+      color: "amber",
+      trend: factories.length > 0 ? "up" : "steady",
+    },
+  ];
+
+  const liveOrderCards = activeOrders.map((order) => ({
+    id: order.id,
+    product: order.product,
+    quantity: order.quantity,
+    date: order.targetDeliveryDate || "Not specified",
+    progress: order.status === "CONFIRMED" ? 35 : 10,
+    status: order.status === "CONFIRMED" ? "Confirmed" : "Awaiting factory confirmation",
+    tone: order.status === "CONFIRMED" ? "teal" : "amber",
+  }));
   const overviewQuotes = [...quotes.map((quote) => toBuyerQuoteView(quote, orders)), ...quotationRows].slice(0, 3);
-  const overviewOrders = [...liveOrderCards, ...orderRows].slice(0, 2);
+  const overviewOrders = liveOrderCards.length > 0 ? liveOrderCards.slice(0, 4) : orderRows.slice(0, 2);
 
   return (
     <>
       <div className="welcome-row">
         <div>
-          <span className="workspace-eyebrow">WEDNESDAY, NOVEMBER 11, 2026</span>
-          <h1>Good morning, {firstName} <span>✦</span></h1>
-          <p>Here&apos;s what&apos;s happening with your production this week.</p>
+          <span className="workspace-eyebrow">{todayLabel}</span>
+          <h1>{greeting}, {firstName} <span>✦</span></h1>
+          <p>Here&apos;s what&apos;s happening with your production today.</p>
         </div>
         <button className="workspace-primary-button" onClick={() => onNavigate("Post Production Request")}><Plus size={16} /> New production request</button>
       </div>
-      <div className="workspace-stats">{buyerStats.map((stat) => <StatCard key={stat.label} stat={stat} />)}</div>
+      <div className="workspace-stats">{liveBuyerStats.map((stat) => <StatCard key={stat.label} stat={stat} />)}</div>
       <section className="workspace-section">
         <SectionHeading eyebrow="DISCOVER MANUFACTURERS" title="Registered factory profiles" description="Explore manufacturing profiles registered on GarmentConnect." action="Explore all factories" onAction={() => onNavigate("Find Factories")} />
         {factoryDirectoryError && <p className="factory-directory-notice" role="status">{factoryDirectoryError}</p>}
@@ -1068,7 +1189,7 @@ function BuyerOverview({
         <SectionHeading title="Orders in progress" action="Track orders" onAction={() => onNavigate("My Orders")} />
         <div className="order-progress-grid">
           {overviewOrders.map((order) => (
-            <div className="mini-order" key={order.id}>
+            <div className="mini-order" key={order.id} onClick={() => onNavigate("My Orders")} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onNavigate("My Orders"); }}>
               <div className="mini-order-top"><span className="order-id">{order.id}</span><StatusBadge tone={order.tone}>{order.status}</StatusBadge></div>
               <strong>{order.product}</strong><span>{order.quantity} <span className="order-dot">·</span> Due {order.date}</span>
               <ProgressBar value={order.progress} label="Production progress" />
@@ -1084,41 +1205,135 @@ function FactoryOverview({
   onNavigate,
   onViewOpportunity,
   onQuoteOpportunity,
+  onConfirmOrder,
   firstName,
+  factoryProfile,
   requests,
+  quotes,
+  orders,
   requestFeedError,
 }: {
   onNavigate: (label: string) => void;
   onViewOpportunity: (request: FactoryOpportunity) => void;
   onQuoteOpportunity: (request: FactoryOpportunity) => void;
+  onConfirmOrder: (orderId: string) => Promise<void>;
   firstName: string;
+  factoryProfile?: FactoryProfileDetails;
   requests: FactoryOpportunity[];
+  quotes: StoredQuote[];
+  orders: DashboardOrder[];
   requestFeedError: string;
 }) {
+  const [confirmingOrderId, setConfirmingOrderId] = useState("");
+  const [confirmError, setConfirmError] = useState("");
+
+  const today = new Date();
+  const todayLabel = formatWorkspaceDate(today);
+  const greeting = getTimeGreeting(today);
+  const currentMonthIndex = today.getMonth();
+
+  const {
+    totalCapacity,
+    bookedUnits,
+    availableUnits,
+    bookedPct,
+    availablePct,
+    confirmedOrders,
+    pendingOrders,
+    activeOrders,
+  } = computeFactoryCapacityMetrics(factoryProfile, orders);
+
+  const unquotedRequestsCount = requests.filter((request) =>
+    !quotes.some((quote) => quote.requestId === request.id),
+  ).length;
+  const capabilityMatchedCount = requests.filter((request) =>
+    matchesFactoryCapabilities(request, factoryProfile),
+  ).length;
+
+  const liveFactoryStats: StatCardItem[] = [
+    {
+      label: "Monthly capacity",
+      value: formatCompactPcs(totalCapacity),
+      suffix: "pcs",
+      change: factoryProfile?.products?.length
+        ? `Across ${factoryProfile.products.length} product categories`
+        : "Configured capacity",
+      icon: Gauge,
+      color: "mint",
+      trend: "steady",
+    },
+    {
+      label: "Available capacity",
+      value: formatCompactPcs(availableUnits),
+      suffix: "pcs",
+      change: `${availablePct}% available · ${bookedUnits.toLocaleString()} booked`,
+      icon: Activity,
+      color: "blue",
+      trend: bookedUnits > 0 ? "up" : "steady",
+    },
+    {
+      label: "New buyer requests",
+      value: String(requests.length).padStart(2, "0"),
+      change: requests.length
+        ? `${unquotedRequestsCount} unquoted · ${capabilityMatchedCount} match profile`
+        : "No open requests yet",
+      icon: Mail,
+      color: "amber",
+      trend: requests.length > 0 ? "up" : "steady",
+    },
+    {
+      label: "Active orders",
+      value: String(activeOrders.length).padStart(2, "0"),
+      change: activeOrders.length
+        ? `${confirmedOrders.length} confirmed · ${pendingOrders.length} awaiting`
+        : "No active orders yet",
+      icon: Package,
+      color: "violet",
+      trend: activeOrders.length > 0 ? "up" : "steady",
+    },
+  ];
+
+  const monthlyUtilization = [46, 61, 55, 74, 62, 72, 68, 80, 73, 76, 66, 70].map(
+    (baseline, index) => (index === currentMonthIndex ? bookedPct : Math.max(bookedPct, baseline > bookedPct && bookedUnits > 0 ? Math.min(95, Math.round((baseline + bookedPct) / 2)) : bookedPct)),
+  );
   const opportunities = [...requests, ...buyerRequests].slice(0, 3);
+
+  async function handleQuickConfirm(orderId: string) {
+    if (confirmingOrderId) return;
+    setConfirmingOrderId(orderId);
+    setConfirmError("");
+    try {
+      await onConfirmOrder(orderId);
+    } catch (error) {
+      setConfirmError(error instanceof Error ? error.message : "Could not confirm order request.");
+    } finally {
+      setConfirmingOrderId("");
+    }
+  }
+
   return (
     <>
       <div className="welcome-row">
         <div>
-          <span className="workspace-eyebrow">WEDNESDAY, NOVEMBER 11, 2026</span>
-          <h1>Good morning, {firstName} <span>✦</span></h1>
-          <p>Your factory is looking good. Here&apos;s your business snapshot.</p>
+          <span className="workspace-eyebrow">{todayLabel}</span>
+          <h1>{greeting}, {firstName} <span>✦</span></h1>
+          <p>Your factory snapshot updates automatically with your capacity, quotes, and orders.</p>
         </div>
         <button className="workspace-primary-button" onClick={() => onNavigate("Available Capacity")}><Gauge size={16} /> Update capacity</button>
       </div>
-      <div className="workspace-stats">{factoryStats.map((stat) => <StatCard key={stat.label} stat={stat} />)}</div>
+      <div className="workspace-stats">{liveFactoryStats.map((stat) => <StatCard key={stat.label} stat={stat} />)}</div>
       <div className="workspace-two-col factory-overview-top">
         <section className="workspace-panel capacity-panel">
           <SectionHeading title="Production capacity" action="Manage capacity" onAction={() => onNavigate("Available Capacity")} />
           <div className="capacity-summary">
-            <div><strong>120,000</strong><span>pcs total monthly capacity</span></div>
-            <div className="capacity-legend"><span><i className="legend-booked" />Booked <b>82,000</b></span><span><i className="legend-available" />Available <b>38,000</b></span></div>
+            <div><strong>{totalCapacity.toLocaleString()}</strong><span>pcs total monthly capacity</span></div>
+            <div className="capacity-legend"><span><i className="legend-booked" />Booked <b>{bookedUnits.toLocaleString()}</b></span><span><i className="legend-available" />Available <b>{availableUnits.toLocaleString()}</b></span></div>
           </div>
-          <div className="capacity-bar"><span style={{ width: "68%" }} /></div>
-          <div className="capacity-bar-labels"><span>68% capacity booked</span><span>32% available</span></div>
+          <div className="capacity-bar"><span style={{ width: `${bookedPct}%` }} /></div>
+          <div className="capacity-bar-labels"><span>{bookedPct}% capacity booked</span><span>{availablePct}% available</span></div>
           <div className="capacity-chart" aria-label="Monthly capacity overview chart">
-            {[46, 61, 55, 74, 62, 82, 68, 91, 73, 84, 66, 78].map((height, index) => (
-              <div className="capacity-column" key={`${height}-${index}`}><span className="capacity-booked" style={{ height: `${height}%` }} /><span className="capacity-free" style={{ height: `${100 - height}%` }} /></div>
+            {monthlyUtilization.map((height, index) => (
+              <div className="capacity-column" key={`month-${index}`}><span className="capacity-booked" style={{ height: `${height}%` }} /><span className="capacity-free" style={{ height: `${100 - height}%` }} /></div>
             ))}
           </div>
           <div className="capacity-months"><span>Jan</span><span>Feb</span><span>Mar</span><span>Apr</span><span>May</span><span>Jun</span><span>Jul</span><span>Aug</span><span>Sep</span><span>Oct</span><span>Nov</span><span>Dec</span></div>
@@ -1126,16 +1341,59 @@ function FactoryOverview({
         <section className="workspace-panel opportunity-panel">
           <SectionHeading eyebrow="AI OPPORTUNITY MATCHING" title="Made for your capabilities" action="See all" onAction={() => onNavigate("Production Requests")} />
           <p className="panel-helper">Buyer requests matched to your production profile.</p>
-          {opportunities.slice(0, 2).map((request) => (
-            <article className="opportunity-item" key={request.id}>
-              <div className="opportunity-top"><span className="match-chip">{typeof request.match === "number" ? <><Sparkles size={12} /> {request.match}% match</> : "New request"}</span><span className="request-time"><Clock3 size={12} /> {request.createdAt ? "Recently posted" : "2h ago"}</span></div>
-              <strong>{request.product}</strong>
-              <span>{request.buyer} <i>·</i> {request.quantity}</span>
-              <div className="opportunity-bottom"><span><CalendarDays size={13} /> Due {request.deadline}</span><button onClick={() => onViewOpportunity(request)}>View request <ArrowRight size={13} /></button></div>
-            </article>
-          ))}
+          {opportunities.slice(0, 2).map((request) => {
+            const matchingOrder = orders.find((order) => order.requestId === request.id && order.status !== "CANCELLED");
+            const matchingQuote = quotes.find((quote) => quote.requestId === request.id);
+            const chipLabel = matchingOrder?.status === "CONFIRMED"
+              ? "Order confirmed"
+              : matchingOrder
+                ? "Order requested"
+                : matchingQuote
+                  ? "Quotation sent"
+                  : typeof request.match === "number"
+                    ? `${request.match}% match`
+                    : matchesFactoryCapabilities(request, factoryProfile)
+                      ? "Capability match"
+                      : "New request";
+            return (
+              <article className="opportunity-item" key={request.id}>
+                <div className="opportunity-top"><span className="match-chip">{typeof request.match === "number" ? <><Sparkles size={12} /> {chipLabel}</> : chipLabel}</span><span className="request-time"><Clock3 size={12} /> {request.createdAt ? "Recently posted" : "Sample"}</span></div>
+                <strong>{request.product}</strong>
+                <span>{request.buyer} <i>·</i> {request.quantity}</span>
+                <div className="opportunity-bottom"><span><CalendarDays size={13} /> Due {request.deadline}</span><button onClick={() => onViewOpportunity(request)}>View request <ArrowRight size={13} /></button></div>
+              </article>
+            );
+          })}
         </section>
       </div>
+      <section className="workspace-panel buyer-order-panel">
+        <SectionHeading title="Recent order requests" description="Track incoming buyer orders and confirm production directly from overview." action="View all orders" onAction={() => onNavigate("Received Orders")} />
+        {confirmError && <p className="field-error" role="alert">{confirmError}</p>}
+        {activeOrders.length > 0 ? (
+          <DataTable headers={["Order", "Buyer", "Product", "Quantity", "Status", ""]}>
+            {activeOrders.slice(0, 4).map((order) => (
+              <tr key={order.id}>
+                <td><strong className="table-main">{order.id}</strong><span className="table-sub">{order.requestId}</span></td>
+                <td>{order.buyerName}</td>
+                <td>{order.product}</td>
+                <td>{order.quantity}</td>
+                <td><StatusBadge tone={order.status === "CONFIRMED" ? "teal" : "amber"}>{order.status === "CONFIRMED" ? "Confirmed" : "Awaiting confirmation"}</StatusBadge></td>
+                <td>
+                  {order.status === "PENDING_FACTORY_CONFIRMATION" ? (
+                    <ActionButton variant="primary" onClick={() => void handleQuickConfirm(order.id)}>
+                      {confirmingOrderId === order.id ? "Confirming..." : "Confirm order"}
+                    </ActionButton>
+                  ) : (
+                    <ActionButton onClick={() => onNavigate("Received Orders")}>Details</ActionButton>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </DataTable>
+        ) : (
+          <p className="request-storage-notice" role="status">Order requests from buyers will appear here as soon as a buyer selects one of your quotations.</p>
+        )}
+      </section>
       <section className="workspace-panel">
         <SectionHeading title="New buyer requests" description="Recent opportunities looking for a manufacturing partner." action="View all requests" onAction={() => onNavigate("Production Requests")} />
         {requestFeedError && <div className="request-storage-notice" role="status">{requestFeedError}</div>}
@@ -1872,52 +2130,253 @@ function FactoryQuotations({
   );
 }
 
-function CapacityManagement({ onContact }: { onContact: (title: string) => void }) {
-  const [capacity, setCapacity] = useState(120000);
+type ProductCapacityRow = {
+  name: string;
+  allocated: number;
+  booked: number;
+  pending: number;
+  free: number;
+  pct: number;
+};
+
+function findMatchingProductCategory(
+  order: DashboardOrder,
+  categories: string[],
+): string | null {
+  const haystack = `${order.productType || ""} ${order.product || ""}`.toLowerCase();
+  for (const category of categories) {
+    const cleanCategory = category.toLowerCase();
+    if (haystack.includes(cleanCategory)) return category;
+    if (cleanCategory === "t-shirt" && (haystack.includes("tee") || haystack.includes("jersey"))) {
+      return category;
+    }
+    if (cleanCategory === "polo shirt" && haystack.includes("polo")) {
+      return category;
+    }
+    if (cleanCategory === "sweater" && haystack.includes("hoodie")) {
+      return category;
+    }
+  }
+  return null;
+}
+
+function computeProductWiseCapacity(
+  factoryProfile: FactoryProfileDetails | undefined,
+  totalCapacity: number,
+  orders: DashboardOrder[],
+): ProductCapacityRow[] {
+  const baseCategories = factoryProfile?.products?.length
+    ? [...new Set(factoryProfile.products.filter(Boolean))]
+    : ["T-shirt", "Polo shirt", "Shirt", "Activewear"];
+
+  const activeOrders = orders.filter((order) => order.status !== "CANCELLED");
+  const hasUnmatchedOrders = activeOrders.some(
+    (order) => !findMatchingProductCategory(order, baseCategories),
+  );
+  const categories = hasUnmatchedOrders && !baseCategories.includes("Other / Custom")
+    ? [...baseCategories, "Other / Custom"]
+    : baseCategories;
+
+  const baseShare = Math.floor(totalCapacity / categories.length);
+  const remainder = totalCapacity - baseShare * categories.length;
+
+  return categories.map((category, index) => {
+    const allocated = baseShare + (index < remainder ? 1 : 0);
+    const matchingOrders = activeOrders.filter((order) => {
+      const matched = findMatchingProductCategory(order, baseCategories);
+      return matched ? matched === category : category === "Other / Custom";
+    });
+    const booked = matchingOrders
+      .filter((order) => order.status === "CONFIRMED")
+      .reduce((sum, order) => sum + parseOrderUnits(order.quantity), 0);
+    const pending = matchingOrders
+      .filter((order) => order.status === "PENDING_FACTORY_CONFIRMATION")
+      .reduce((sum, order) => sum + parseOrderUnits(order.quantity), 0);
+    const free = Math.max(allocated - booked, 0);
+    const pct = allocated > 0 ? Math.min(100, Math.round((booked / allocated) * 100)) : 0;
+    return {
+      name: category,
+      allocated,
+      booked,
+      pending,
+      free,
+      pct,
+    };
+  });
+}
+
+function parseOrderDeliveryDate(rawDate: string): Date | null {
+  if (!rawDate || rawDate === "Not specified") return null;
+  const parsed = new Date(rawDate);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function CapacityManagement({
+  onContact,
+  onNavigate,
+  factoryProfile,
+  orders,
+  onSaveFactoryProfile,
+}: {
+  onContact: (title: string) => void;
+  onNavigate: (label: string) => void;
+  factoryProfile?: FactoryProfileDetails;
+  orders: DashboardOrder[];
+  onSaveFactoryProfile?: (profile: FactoryProfileDetails) => Promise<string>;
+}) {
+  const {
+    totalCapacity: capacity,
+    bookedUnits: booked,
+    availableUnits: available,
+    bookedPct,
+    availablePct,
+    confirmedOrders,
+    pendingOrders,
+  } = computeFactoryCapacityMetrics(factoryProfile, orders);
+  const productLines = computeProductWiseCapacity(factoryProfile, capacity, orders);
+
   const [editing, setEditing] = useState(false);
-  const [input, setInput] = useState("120000");
+  const [input, setInput] = useState(String(capacity));
+  const [saving, setSaving] = useState(false);
   const [monthOffset, setMonthOffset] = useState(0);
-  const [selectedDate, setSelectedDate] = useState(11);
-  const booked = 82000;
-  const available = capacity - booked;
-  const calendarMonth = new Date(2026, 10 + monthOffset, 1);
+
+  const today = new Date();
+  const calendarMonth = new Date(today.getFullYear(), today.getMonth() + monthOffset, 1);
   const monthLabel = calendarMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const shortMonth = calendarMonth.toLocaleDateString("en-US", { month: "short" });
   const daysInMonth = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0).getDate();
-  const previousMonthDays = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 0).getDate();
-  const startOffset = (calendarMonth.getDay() + 6) % 7;
+
+  const weekRanges = [
+    { label: "Week 1", start: 1, end: 7 },
+    { label: "Week 2", start: 8, end: 14 },
+    { label: "Week 3", start: 15, end: 21 },
+    { label: "Week 4", start: 22, end: daysInMonth },
+  ];
+  const weeklyTarget = Math.max(1, Math.round(capacity / 4));
+  const weekSlots = weekRanges.map((range, index) => {
+    const isCurrentWeek =
+      monthOffset === 0 && today.getDate() >= range.start && today.getDate() <= range.end;
+    const dueOrders = orders.filter((order) => {
+      if (order.status === "CANCELLED") return false;
+      const due = parseOrderDeliveryDate(order.targetDeliveryDate);
+      if (!due) return false;
+      return (
+        due.getFullYear() === calendarMonth.getFullYear() &&
+        due.getMonth() === calendarMonth.getMonth() &&
+        due.getDate() >= range.start &&
+        due.getDate() <= range.end
+      );
+    });
+    const confirmedInWeek = dueOrders.filter((order) => order.status === "CONFIRMED");
+    const bookedInWeek = confirmedInWeek.reduce((sum, order) => sum + parseOrderUnits(order.quantity), 0);
+    const pendingInWeek = dueOrders
+      .filter((order) => order.status === "PENDING_FACTORY_CONFIRMATION")
+      .reduce((sum, order) => sum + parseOrderUnits(order.quantity), 0);
+    const slotCapacity = index === 3 ? Math.max(1, capacity - weeklyTarget * 3) : weeklyTarget;
+    const slotPct = Math.min(100, Math.round((bookedInWeek / slotCapacity) * 100));
+    const slotTone = slotPct >= 90 ? "amber" : slotPct > 0 ? "blue" : "teal";
+    const slotStatus = slotPct >= 100 ? "Full" : slotPct >= 70 ? "Busy" : slotPct > 0 ? "Partial" : "Open";
+    return {
+      ...range,
+      dateText: `${shortMonth} ${range.start}–${range.end}`,
+      isCurrentWeek,
+      dueOrdersCount: dueOrders.length,
+      confirmedInWeekCount: confirmedInWeek.length,
+      bookedInWeek,
+      pendingInWeek,
+      freeInWeek: Math.max(slotCapacity - bookedInWeek, 0),
+      slotPct,
+      slotTone,
+      slotStatus,
+    };
+  });
+
+  const availabilityStatus =
+    available <= 0
+      ? { label: "At full capacity", tone: "amber", summary: "All monthly production capacity is currently booked." }
+      : bookedPct >= 75
+        ? { label: "Limited capacity", tone: "amber", summary: `${available.toLocaleString()} pcs left (${availablePct}% open for new orders).` }
+        : { label: "Open for orders", tone: "teal", summary: `${available.toLocaleString()} pcs available (${availablePct}% ready across lines).` };
+
+  async function saveUpdatedCapacity() {
+    if (saving) return;
+    const nextCapacity = Math.max(booked, Number(input) || booked);
+    if (factoryProfile && onSaveFactoryProfile) {
+      setSaving(true);
+      try {
+        await onSaveFactoryProfile({ ...factoryProfile, monthlyCapacity: nextCapacity });
+      } finally {
+        setSaving(false);
+      }
+    }
+    setEditing(false);
+    onContact("Capacity updated");
+  }
+
   return (
     <>
       <SectionHeading eyebrow="PLAN YOUR PRODUCTION" title="Available capacity" description="Keep your production availability current so buyers can find the right fit." action={editing ? undefined : "Update capacity"} onAction={() => { setEditing(true); setInput(String(capacity)); }} />
       <div className="capacity-kpi-grid">
-        <article className="capacity-kpi"><span>Total monthly capacity</span><strong>{capacity.toLocaleString()} <small>pcs</small></strong><div><Factory size={14} /> Across all production lines</div></article>
-        <article className="capacity-kpi"><span>Already booked</span><strong>{booked.toLocaleString()} <small>pcs</small></strong><div><Package size={14} /> Confirmed production orders</div></article>
-        <article className="capacity-kpi capacity-kpi-teal"><span>Available capacity</span><strong>{Math.max(available, 0).toLocaleString()} <small>pcs</small></strong><div><CheckCircle2 size={14} /> Open for new opportunities</div></article>
+        <article className="capacity-kpi"><span>Total monthly capacity</span><strong>{capacity.toLocaleString()} <small>pcs</small></strong><div><Factory size={14} /> Across {productLines.length} product categories</div></article>
+        <article className="capacity-kpi"><span>Already booked</span><strong>{booked.toLocaleString()} <small>pcs</small></strong><div><Package size={14} /> {confirmedOrders.length} confirmed {confirmedOrders.length === 1 ? "order" : "orders"}</div></article>
+        <article className="capacity-kpi capacity-kpi-teal"><span>Available capacity</span><strong>{Math.max(available, 0).toLocaleString()} <small>pcs</small></strong><div><CheckCircle2 size={14} /> {availablePct}% open for new opportunities</div></article>
       </div>
-      {editing && <div className="capacity-edit workspace-panel"><label className="workspace-field"><span>Monthly capacity (pieces)</span><input type="number" min={booked} value={input} onChange={(event) => setInput(event.target.value)} /></label><button className="workspace-primary-button" onClick={() => { setCapacity(Math.max(booked, Number(input) || booked)); setEditing(false); onContact("Capacity updated"); }}>Save capacity <Check size={15} /></button><button className="cancel-button" onClick={() => setEditing(false)}>Cancel</button></div>}
+      {editing && <div className="capacity-edit workspace-panel"><label className="workspace-field"><span>Monthly capacity (pieces)</span><input type="number" min={booked} value={input} onChange={(event) => setInput(event.target.value)} /></label><button className="workspace-primary-button" disabled={saving} onClick={() => void saveUpdatedCapacity()}>{saving ? "Saving..." : <>Save capacity <Check size={15} /></>}</button><button className="cancel-button" disabled={saving} onClick={() => setEditing(false)}>Cancel</button></div>}
       <div className="workspace-two-col capacity-detail-grid">
         <section className="workspace-panel">
-          <SectionHeading title="Product-wise capacity" description="Capacity allocated to each product category." />
-          {[
-            { name: "Knit tops & tees", booked: 74, total: "60,000 pcs", color: "mint" },
-            { name: "Polo shirts", booked: 62, total: "25,000 pcs", color: "blue" },
-            { name: "Sweatshirts & hoodies", booked: 55, total: "20,000 pcs", color: "violet" },
-            { name: "Custom orders", booked: 81, total: "15,000 pcs", color: "amber" },
-          ].map((line) => <div className="capacity-line" key={line.name}><div><strong>{line.name}</strong><span>{line.total}</span></div><ProgressBar value={line.booked} label={`${line.booked}% booked`} /></div>)}
+          <SectionHeading title="Product-wise capacity" description="Monthly capacity and confirmed orders broken down by product category." action="Edit products" onAction={() => onNavigate("Manufacturing Capabilities")} />
+          {productLines.map((line) => (
+            <div className="capacity-line" key={line.name}>
+              <div>
+                <strong>{line.name}</strong>
+                <span>{line.allocated.toLocaleString()} pcs total · {line.free.toLocaleString()} pcs free</span>
+              </div>
+              <ProgressBar
+                value={line.pct}
+                label={`${line.booked.toLocaleString()} pcs booked${line.pending > 0 ? ` (${line.pending.toLocaleString()} awaiting confirmation)` : ""}`}
+              />
+            </div>
+          ))}
         </section>
         <section className="workspace-panel">
-          <SectionHeading title="Production availability" action="View calendar" onAction={() => onContact("Production availability calendar")} />
-          <div className="calendar-head"><button aria-label="Previous month" onClick={() => { setMonthOffset((current) => current - 1); setSelectedDate(0); }}><ChevronLeft size={17} /></button><strong>{monthLabel}</strong><button aria-label="Next month" onClick={() => { setMonthOffset((current) => current + 1); setSelectedDate(0); }}><ChevronRight size={17} /></button></div>
-          <div className="capacity-calendar">
-            {["M","T","W","T","F","S","S"].map((day, index) => <span className="calendar-day-label" key={`${day}-${index}`}>{day}</span>)}
-            {Array.from({ length: 42 }, (_, index) => {
-              const date = index - startOffset + 1;
-              const actual = date > 0 && date <= daysInMonth;
-              const displayDate = date <= 0 ? previousMonthDays + date : date > daysInMonth ? date - daysInMonth : date;
-              const level = actual && (date % 7 === 0 || date % 9 === 0) ? "calendar-busy" : actual && date % 5 === 0 ? "calendar-mid" : "";
-              return <button className={`calendar-date ${actual ? "" : "calendar-outside"} ${level} ${monthOffset === 0 && date === selectedDate && actual ? "calendar-today" : ""}`} key={index} onClick={() => actual && setSelectedDate(date)}>{displayDate}</button>;
-            })}
+          <SectionHeading title="Production availability" description="Weekly booking capacity and scheduled order deliveries." action="View orders" onAction={() => onNavigate("Received Orders")} />
+          <div className="availability-status-box">
+            <div>
+              <StatusBadge tone={availabilityStatus.tone}>{availabilityStatus.label}</StatusBadge>
+              <p>{availabilityStatus.summary}</p>
+            </div>
+            {pendingOrders.length > 0 && (
+              <button type="button" className="workspace-text-action" onClick={() => onNavigate("Received Orders")}>
+                {pendingOrders.length} pending confirmation <ArrowRight size={14} />
+              </button>
+            )}
           </div>
-          <div className="calendar-legend"><span><i className="legend-open" />Available</span><span><i className="legend-mid" />Limited</span><span><i className="legend-full" />At capacity</span></div>
+          <div className="calendar-head">
+            <button aria-label="Previous month" onClick={() => setMonthOffset((current) => current - 1)}><ChevronLeft size={17} /></button>
+            <strong>{monthLabel}</strong>
+            <button aria-label="Next month" onClick={() => setMonthOffset((current) => current + 1)}><ChevronRight size={17} /></button>
+          </div>
+          <div className="availability-week-list">
+            {weekSlots.map((slot) => (
+              <div className={`availability-week-row ${slot.isCurrentWeek ? "availability-week-current" : ""}`} key={slot.label}>
+                <div className="availability-week-head">
+                  <div>
+                    <strong>{slot.label} · {slot.dateText}</strong>
+                    {slot.isCurrentWeek && <span className="availability-current-pill">This week</span>}
+                  </div>
+                  <StatusBadge tone={slot.slotTone}>{slot.slotStatus}</StatusBadge>
+                </div>
+                <p className="availability-week-meta">
+                  {slot.confirmedInWeekCount > 0
+                    ? `${slot.confirmedInWeekCount} confirmed (${slot.bookedInWeek.toLocaleString()} pcs) · ${slot.freeInWeek.toLocaleString()} pcs free`
+                    : slot.pendingInWeek > 0
+                      ? `${slot.pendingInWeek.toLocaleString()} pcs awaiting confirmation · ${slot.freeInWeek.toLocaleString()} pcs free`
+                      : `No orders due · ${slot.freeInWeek.toLocaleString()} pcs open`}
+                </p>
+                <div className="availability-week-bar"><span style={{ width: `${slot.slotPct}%` }} /></div>
+              </div>
+            ))}
+          </div>
         </section>
       </div>
     </>
@@ -1934,8 +2393,11 @@ function FactoryProfile({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(profile);
   const [saving, setSaving] = useState(false);
+  const [coverSaving, setCoverSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
+  const bannerCoverInputRef = useRef<HTMLInputElement | null>(null);
+  const editorCoverInputRef = useRef<HTMLInputElement | null>(null);
 
   function updateField<K extends keyof FactoryProfileDetails>(field: K, value: FactoryProfileDetails[K]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -1949,6 +2411,60 @@ function FactoryProfile({
         ? draft[field].filter((item) => item !== value)
         : [...draft[field], value],
     );
+  }
+
+  async function handleBannerCoverSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || coverSaving) return;
+
+    setCoverSaving(true);
+    setSaveError("");
+    setSaveMessage("");
+    try {
+      const coverDataUrl = await compressCoverImage(file);
+      const nextProfile: FactoryProfileDetails = { ...profile, coverPhotoURL: coverDataUrl };
+      const message = await onSave(nextProfile);
+      setDraft(nextProfile);
+      setSaveMessage(message);
+    } catch (error) {
+      console.error("[Factory profile] Failed to update background photo:", error);
+      setSaveError(error instanceof Error ? error.message : "Could not update the background photo.");
+    } finally {
+      setCoverSaving(false);
+    }
+  }
+
+  async function handleRemoveBannerCover() {
+    if (coverSaving) return;
+    setCoverSaving(true);
+    setSaveError("");
+    setSaveMessage("");
+    try {
+      const nextProfile: FactoryProfileDetails = { ...profile, coverPhotoURL: "" };
+      const message = await onSave(nextProfile);
+      setDraft(nextProfile);
+      setSaveMessage(message);
+    } catch (error) {
+      console.error("[Factory profile] Failed to remove background photo:", error);
+      setSaveError(error instanceof Error ? error.message : "Could not remove the background photo.");
+    } finally {
+      setCoverSaving(false);
+    }
+  }
+
+  async function handleEditorCoverSelected(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setSaveError("");
+    try {
+      const coverDataUrl = await compressCoverImage(file);
+      updateField("coverPhotoURL", coverDataUrl);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not load the selected background photo.");
+    }
   }
 
   async function submitProfile(event: React.FormEvent<HTMLFormElement>) {
@@ -1977,6 +2493,8 @@ function FactoryProfile({
   const websiteUrl = profile.website && /^https?:\/\//i.test(profile.website)
     ? profile.website
     : profile.website ? `https://${profile.website}` : "";
+  const hasCustomCover = Boolean(profile.coverPhotoURL?.trim());
+  const hasDraftCover = Boolean(draft.coverPhotoURL?.trim());
 
   return (
     <>
@@ -1988,9 +2506,41 @@ function FactoryProfile({
         onAction={() => { setDraft(profile); setSaveError(""); setEditing(true); }}
       />
       {saveMessage && <div className="profile-save-message" role="status"><CheckCircle2 size={16} />{saveMessage}</div>}
+      {!editing && saveError && <div className="profile-edit-error" role="alert">{saveError}</div>}
       {editing ? (
         <form className="workspace-panel factory-profile-editor" onSubmit={submitProfile}>
-          <div className="request-form-section"><span className="form-step-number">01</span><div><h3>Factory and contact details</h3><p>Keep your registration information accurate for buyer discovery.</p></div></div>
+          <div className="request-form-section"><span className="form-step-number">01</span><div><h3>Background photo &amp; identity</h3><p>Add or update the cover background photo shown on your factory profile and buyer marketplace card.</p></div></div>
+          <div className="factory-cover-editor">
+            <div className="factory-cover-preview">
+              {hasDraftCover ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={draft.coverPhotoURL} alt={`${draft.companyName || "Factory"} background preview`} className="profile-cover-img" />
+                  <div className="profile-cover-overlay" />
+                </>
+              ) : (
+                <div className="factory-cover-default-tag">Default factory banner</div>
+              )}
+            </div>
+            <div className="factory-cover-controls">
+              <input
+                ref={editorCoverInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="sr-only-file"
+                onChange={handleEditorCoverSelected}
+              />
+              <button type="button" className="cancel-button factory-cover-upload-btn" onClick={() => editorCoverInputRef.current?.click()}>
+                {hasDraftCover ? <><Camera size={14} /> Change background photo</> : <><ImagePlus size={14} /> Add background photo</>}
+              </button>
+              {hasDraftCover && (
+                <button type="button" className="factory-cover-remove-btn" onClick={() => updateField("coverPhotoURL", "")}>
+                  <Trash2 size={14} /> Remove photo
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="request-form-section" style={{ marginTop: 22 }}><span className="form-step-number">02</span><div><h3>Factory and contact details</h3><p>Keep your registration information accurate for buyer discovery.</p></div></div>
           <div className="request-form-grid">
             <label className="workspace-field"><span>Owner / representative name *</span><input required value={draft.fullName} onChange={(event) => updateField("fullName", event.target.value)} /></label>
             <label className="workspace-field"><span>Company / factory name *</span><input required value={draft.companyName} onChange={(event) => updateField("companyName", event.target.value)} /></label>
@@ -2026,7 +2576,43 @@ function FactoryProfile({
       ) : (
         <>
           <section className="workspace-panel profile-banner">
-            <div className="profile-cover" />
+            <div className="profile-cover">
+              {hasCustomCover && (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={profile.coverPhotoURL} alt={`${profile.companyName || "Factory"} background`} className="profile-cover-img" />
+                  <div className="profile-cover-overlay" />
+                </>
+              )}
+              <input
+                ref={bannerCoverInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="sr-only-file"
+                onChange={(event) => void handleBannerCoverSelected(event)}
+              />
+              <div className="profile-cover-actions">
+                <button
+                  type="button"
+                  className="profile-cover-btn"
+                  disabled={coverSaving}
+                  onClick={() => bannerCoverInputRef.current?.click()}
+                >
+                  {hasCustomCover ? <><Camera size={13} /> {coverSaving ? "Saving..." : "Edit background photo"}</> : <><ImagePlus size={13} /> {coverSaving ? "Saving..." : "Add background photo"}</>}
+                </button>
+                {hasCustomCover && (
+                  <button
+                    type="button"
+                    className="profile-cover-btn profile-cover-btn-remove"
+                    disabled={coverSaving}
+                    onClick={() => void handleRemoveBannerCover()}
+                    aria-label="Remove background photo"
+                  >
+                    <Trash2 size={13} /> Remove
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="profile-main-info">
               <div className="factory-logo">{companyInitials}</div>
               <div className="profile-title">
@@ -2232,6 +2818,7 @@ function BuyerGenericPage({
 function FactoryGenericPage({
   page,
   onContact,
+  onNavigate,
   onViewOpportunity,
   onQuoteOpportunity,
   quotes,
@@ -2241,11 +2828,16 @@ function FactoryGenericPage({
   onConfirmOrder,
   factoryProfile,
   onSaveFactoryProfile,
+  factoryTheme,
+  onChangeFactoryTheme,
+  onResetFactoryAccount,
+  onDeleteFactoryAccount,
   requests,
   requestFeedError,
 }: {
   page: string;
   onContact: (title: string) => void;
+  onNavigate: (label: string) => void;
   onViewOpportunity: (request: FactoryOpportunity) => void;
   onQuoteOpportunity: (request: FactoryOpportunity) => void;
   quotes: StoredQuote[];
@@ -2255,6 +2847,10 @@ function FactoryGenericPage({
   onConfirmOrder: (orderId: string) => Promise<void>;
   factoryProfile?: FactoryProfileDetails;
   onSaveFactoryProfile?: (profile: FactoryProfileDetails) => Promise<string>;
+  factoryTheme?: BuyerTheme;
+  onChangeFactoryTheme?: (theme: BuyerTheme) => Promise<void> | void;
+  onResetFactoryAccount?: () => Promise<string>;
+  onDeleteFactoryAccount?: (password: string) => Promise<void>;
   requests: FactoryOpportunity[];
   requestFeedError: string;
 }) {
@@ -2264,7 +2860,7 @@ function FactoryGenericPage({
     }
     return <FactoryProfile profile={factoryProfile} onSave={onSaveFactoryProfile} />;
   }
-  if (page === "Available Capacity") return <CapacityManagement onContact={onContact} />;
+  if (page === "Available Capacity") return <CapacityManagement onContact={onContact} onNavigate={onNavigate} factoryProfile={factoryProfile} orders={orders} onSaveFactoryProfile={onSaveFactoryProfile} />;
   if (page === "Production Requests") return <FactoryRequests onViewOpportunity={onViewOpportunity} onQuoteOpportunity={onQuoteOpportunity} requests={requests} requestFeedError={requestFeedError} />;
   if (page === "Received Orders") return <OrdersPage factory onContact={onContact} orders={orders} onConfirmOrder={onConfirmOrder} feedError={orderFeedError} />;
   if (page === "My Quotations") return <FactoryQuotations onContact={onContact} quotes={quotes} orders={orders} quoteFeedError={quoteFeedError} />;
@@ -2275,6 +2871,18 @@ function FactoryGenericPage({
     return <CapabilitiesPage profile={factoryProfile} onSave={onSaveFactoryProfile} />;
   }
   if (page === "Production Management") return <ProductionManagement onContact={onContact} />;
+  if (page === "Settings" && factoryProfile && onSaveFactoryProfile && onChangeFactoryTheme && onResetFactoryAccount && onDeleteFactoryAccount) {
+    return (
+      <FactorySettingsPage
+        profile={factoryProfile}
+        theme={factoryTheme ?? "default"}
+        onSaveProfile={onSaveFactoryProfile}
+        onChangeTheme={onChangeFactoryTheme}
+        onResetAccount={onResetFactoryAccount}
+        onDeleteAccount={onDeleteFactoryAccount}
+      />
+    );
+  }
   return <UtilityPage page={page} onContact={onContact} />;
 }
 
@@ -2387,13 +2995,13 @@ function MessagesPage({ onContact }: { onContact: (title: string) => void }) {
   return (
     <>
       <SectionHeading eyebrow="STAY IN THE LOOP" title="Messages" description="Keep every production conversation in one place." />
-      <div className="messages-layout workspace-panel"><div className="conversation-list">{conversations.map((conversation, index) => <button className={`conversation-preview ${selected === index ? "conversation-selected" : ""}`} onClick={() => setSelected(index)} key={conversation.name}><span className={`quote-avatar avatar-${conversation.color}`}>{initials(conversation.name)}</span><span><b>{conversation.name}</b><small>{conversation.subject}</small></span><span className="conversation-time">{conversation.time}{conversation.unread && <i />}</span></button>)}</div><div className="conversation-thread"><div className="thread-header"><span className="quote-avatar">{initials(conversations[selected].name)}</span><span><b>{conversations[selected].name}</b><small><span className="online-dot" /> Online now</small></span><button className="icon-quiet" onClick={() => onContact("Conversation details")}><MoreHorizontal size={19} /></button></div><div className="thread-date">TODAY, NOVEMBER 11</div><div className="message-bubble received">Hi Alex! We reviewed the tech pack and can confirm we can meet the requested delivery date. We&apos;ll send the updated sample photos shortly.<small>10:24 AM</small></div><div className="message-bubble sent">That sounds great, thank you! Please include a close-up of the fabric texture if possible.<small>10:31 AM <Check size={11} /></small></div><div className="message-bubble received">Absolutely — we&apos;ll share those this afternoon.</div><form className="message-composer" onSubmit={(event) => { event.preventDefault(); if (message.trim()) { onContact("Message sent"); setMessage(""); } }}><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write a message..." /><button aria-label="Send message" type="submit"><Send size={16} /></button></form></div></div>
+      <div className="messages-layout workspace-panel"><div className="conversation-list">{conversations.map((conversation, index) => <button className={`conversation-preview ${selected === index ? "conversation-selected" : ""}`} onClick={() => setSelected(index)} key={conversation.name}><span className={`quote-avatar avatar-${conversation.color}`}>{initials(conversation.name)}</span><span><b>{conversation.name}</b><small>{conversation.subject}</small></span><span className="conversation-time">{conversation.time}{conversation.unread && <i />}</span></button>)}</div><div className="conversation-thread"><div className="thread-header"><span className="quote-avatar">{initials(conversations[selected].name)}</span><span><b>{conversations[selected].name}</b><small><span className="online-dot" /> Online now</small></span><button className="icon-quiet" onClick={() => onContact("Conversation details")}><MoreHorizontal size={19} /></button></div><div className="thread-date">{`TODAY, ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric" }).toUpperCase()}`}</div><div className="message-bubble received">Hi Alex! We reviewed the tech pack and can confirm we can meet the requested delivery date. We&apos;ll send the updated sample photos shortly.<small>10:24 AM</small></div><div className="message-bubble sent">That sounds great, thank you! Please include a close-up of the fabric texture if possible.<small>10:31 AM <Check size={11} /></small></div><div className="message-bubble received">Absolutely — we&apos;ll share those this afternoon.</div><form className="message-composer" onSubmit={(event) => { event.preventDefault(); if (message.trim()) { onContact("Message sent"); setMessage(""); } }}><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Write a message..." /><button aria-label="Send message" type="submit"><Send size={16} /></button></form></div></div>
     </>
   );
 }
 
 function ReviewsPage() {
-  return <><SectionHeading eyebrow="TRUST BUILT TOGETHER" title="Reviews & ratings" description="See what your brand partners have to say about working with your factory." /><div className="workspace-two-col"><section className="workspace-panel review-summary"><span className="review-score">4.9 <Star size={22} fill="currentColor" /></span><span className="review-outof">out of 5</span><span className="review-total">Based on 38 verified reviews</span>{[5,4,3,2,1].map((star) => <div className="review-rating-row" key={star}><span>{star} <Star size={11} fill="currentColor" /></span><div><i style={{ width: `${star === 5 ? 78 : star === 4 ? 17 : 3}%` }} /></div><small>{star === 5 ? 30 : star === 4 ? 6 : star === 3 ? 2 : 0}</small></div>)}</section><section className="workspace-panel"><SectionHeading title="Recent feedback" /><div className="review-item"><div><b>Northstar Studio</b><span>★★★★★</span></div><p>Excellent communication and beautiful quality. The team was proactive throughout the entire production run.</p><small>Organic cotton tees · Oct 28, 2026</small></div><div className="review-item"><div><b>Fieldwork Goods</b><span>★★★★★</span></div><p>Reliable partner and clear updates at every stage. We&apos;re already planning our next collection.</p><small>Relaxed-fit overshirt · Sep 14, 2026</small></div></section></div></>;
+  return <><SectionHeading eyebrow="TRUST BUILT TOGETHER" title="Reviews & ratings" description="See what your brand partners have to say about working with your factory." /><div className="workspace-two-col"><section className="workspace-panel review-summary"><span className="review-score">4.9 <Star size={22} fill="currentColor" /></span><span className="review-outof">out of 5</span><span className="review-total">Based on 38 verified reviews</span>{[5, 4, 3, 2, 1].map((star) => <div className="review-rating-row" key={star}><span>{star} <Star size={11} fill="currentColor" /></span><div><i style={{ width: `${star === 5 ? 78 : star === 4 ? 17 : 3}%` }} /></div><small>{star === 5 ? 30 : star === 4 ? 6 : star === 3 ? 2 : 0}</small></div>)}</section><section className="workspace-panel"><SectionHeading title="Recent feedback" /><div className="review-item"><div><b>Northstar Studio</b><span>★★★★★</span></div><p>Excellent communication and beautiful quality. The team was proactive throughout the entire production run.</p><small>Organic cotton tees · Oct 28, 2026</small></div><div className="review-item"><div><b>Fieldwork Goods</b><span>★★★★★</span></div><p>Reliable partner and clear updates at every stage. We&apos;re already planning our next collection.</p><small>Relaxed-fit overshirt · Sep 14, 2026</small></div></section></div></>;
 }
 
 function DocumentsPage({ onContact }: { onContact: (title: string) => void }) {
@@ -2416,6 +3024,10 @@ export function DashboardWorkspace({
   userEmail,
   factoryProfile,
   onSaveFactoryProfile,
+  factoryTheme,
+  onChangeFactoryTheme,
+  onResetFactoryAccount,
+  onDeleteFactoryAccount,
   buyerProfile,
   onSaveBuyerProfile,
   buyerTheme,
@@ -2430,6 +3042,10 @@ export function DashboardWorkspace({
   userEmail?: string;
   factoryProfile?: FactoryProfileDetails;
   onSaveFactoryProfile?: (profile: FactoryProfileDetails) => Promise<string>;
+  factoryTheme?: BuyerTheme;
+  onChangeFactoryTheme?: (theme: BuyerTheme) => Promise<void> | void;
+  onResetFactoryAccount?: () => Promise<string>;
+  onDeleteFactoryAccount?: (password: string) => Promise<void>;
   buyerProfile?: BuyerProfileDetails;
   onSaveBuyerProfile?: (profile: BuyerProfileDetails) => Promise<string>;
   buyerTheme?: BuyerTheme;
@@ -2466,9 +3082,14 @@ export function DashboardWorkspace({
   const [factoryRequests, setFactoryRequests] = useState<FactoryOpportunity[]>([]);
   const [factoryRequestFeedError, setFactoryRequestFeedError] = useState("");
 
-  const displayName = role === "buyer" ? buyerProfile?.fullName || fullName : fullName;
+  const factoryAccount = role === "factory" && userEmail ? findAccount(userEmail) : undefined;
+  const displayName = role === "buyer" ? buyerProfile?.fullName || fullName : factoryProfile?.fullName || fullName;
   const buyerCompanyName = role === "buyer" ? buyerProfile?.companyName?.trim() || "Northstar Studio" : "";
-  const buyerAvatarUrl = role === "buyer" ? buyerProfile?.photoURL?.trim() || "" : "";
+  const factoryCompanyName = role === "factory"
+    ? factoryProfile?.companyName?.trim() || factoryAccount?.companyName?.trim() || fullName || "My Factory"
+    : "";
+  const avatarUrl = role === "buyer" ? buyerProfile?.photoURL?.trim() || "" : factoryProfile?.photoURL?.trim() || "";
+  const activeTheme = role === "factory" ? factoryTheme ?? "default" : buyerTheme ?? "default";
   const firstName = displayName.split(/\s+/)[0] || (role === "buyer" ? "Alex" : "Samira");
   const subtitle = role === "buyer" ? "BUYER WORKSPACE" : "FACTORY WORKSPACE";
   const quoteOwnerKey = `${role}:${userId ?? ""}:${userEmail?.trim().toLowerCase() ?? ""}`;
@@ -2574,7 +3195,10 @@ export function DashboardWorkspace({
       : null;
     if (channel) channel.onmessage = onLocalRequestUpdate;
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    let stopRemoteRequests = () => { };
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      stopRemoteRequests();
+      stopRemoteRequests = () => { };
       if (!active) return;
       if (!firebaseUser) {
         setFactoryRequestFeedError("");
@@ -2584,22 +3208,22 @@ export function DashboardWorkspace({
         return;
       }
 
-      try {
-        const snapshot = await getDocs(query(
-          collection(db, "orders"),
-          where("factoryId", "==", null),
-        ));
-        if (!active) return;
-        const remoteRequests = snapshot.docs
-          .filter((request) => request.data().status === "PENDING_QUOTE")
-          .map((request) => toRemoteFactoryOpportunity(request.data(), request.id))
-          .filter((request): request is FactoryOpportunity => request !== null);
-        setFactoryRequests((current) => mergeFactoryOpportunities(current, remoteRequests));
-        setFactoryRequestFeedError("");
-      } catch (error) {
-        console.error("[Factory requests] Failed to load online buyer requests:", error);
-        if (active) setFactoryRequestFeedError("Online buyer requests could not be loaded. Showing requests saved in this browser.");
-      }
+      stopRemoteRequests = onSnapshot(
+        query(collection(db, "orders"), where("factoryId", "==", null)),
+        (snapshot) => {
+          if (!active) return;
+          const remoteRequests = snapshot.docs
+            .filter((request) => request.data().status === "PENDING_QUOTE")
+            .map((request) => toRemoteFactoryOpportunity(request.data(), request.id))
+            .filter((request): request is FactoryOpportunity => request !== null);
+          setFactoryRequests((current) => mergeFactoryOpportunities(current, remoteRequests));
+          setFactoryRequestFeedError("");
+        },
+        (error) => {
+          console.error("[Factory requests] Failed to load online buyer requests:", error);
+          if (active) setFactoryRequestFeedError("Online buyer requests could not be loaded. Showing requests saved in this browser.");
+        },
+      );
     });
 
     return () => {
@@ -2607,6 +3231,7 @@ export function DashboardWorkspace({
       window.removeEventListener("garmentconnect:production-requests-updated", onLocalRequestUpdate);
       channel?.close();
       unsubscribe();
+      stopRemoteRequests();
     };
   }, [role, userEmail]);
 
@@ -2644,7 +3269,7 @@ export function DashboardWorkspace({
   useEffect(() => {
     if (!userId || !userEmail) return;
     let active = true;
-    let stopRemoteQuotes = () => {};
+    let stopRemoteQuotes = () => { };
     const reloadLocalQuotes = () => {
       if (typeof indexedDB === "undefined") {
         if (active) setQuoteFeedError("This browser does not support local quotation storage.");
@@ -2677,7 +3302,7 @@ export function DashboardWorkspace({
 
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       stopRemoteQuotes();
-      stopRemoteQuotes = () => {};
+      stopRemoteQuotes = () => { };
       if (!active || !firebaseUser || firebaseUser.email?.toLowerCase() !== userEmail.trim().toLowerCase()) return;
 
       const ownerField = role === "buyer" ? "buyerId" : "factoryId";
@@ -2713,7 +3338,7 @@ export function DashboardWorkspace({
   useEffect(() => {
     if (!userId || !userEmail) return;
     let active = true;
-    let stopRemoteOrders = () => {};
+    let stopRemoteOrders = () => { };
     const reloadLocalOrders = () => {
       if (typeof indexedDB === "undefined") {
         if (active) setOrderFeedError("This browser does not support local order storage.");
@@ -2746,7 +3371,7 @@ export function DashboardWorkspace({
 
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       stopRemoteOrders();
-      stopRemoteOrders = () => {};
+      stopRemoteOrders = () => { };
       if (!active || !firebaseUser || firebaseUser.email?.toLowerCase() !== userEmail.trim().toLowerCase()) return;
 
       const ownerField = role === "buyer" ? "buyerId" : "factoryId";
@@ -3178,6 +3803,16 @@ export function DashboardWorkspace({
     return message;
   }
 
+  async function handleResetFactoryWorkspace(): Promise<string> {
+    if (!onResetFactoryAccount) {
+      throw new Error("Account reset is unavailable right now.");
+    }
+    const message = await onResetFactoryAccount();
+    setQuoteState({ ownerKey: quoteOwnerKey, quotes: [] });
+    setOrderState({ ownerKey: quoteOwnerKey, orders: [] });
+    return message;
+  }
+
   async function addProductionRequest(request: BuyerRequestRow): Promise<RequestSubmissionResult> {
     if (!userId) throw new Error("Your account could not be identified. Please sign in again.");
     const buyerAccount = userEmail ? findAccount(userEmail) : undefined;
@@ -3229,7 +3864,7 @@ export function DashboardWorkspace({
     if (activePage === "Overview") {
       return role === "buyer"
         ? <BuyerOverview onNavigate={navigate} saved={saved} onToggleSave={toggleSave} onContact={openDialog} onViewFactory={openFactoryProfile} firstName={firstName} requests={enrichedRequests} quotes={storedQuotes} orders={storedOrders} factories={factories} factoriesLoading={factoriesLoading} factoryDirectoryError={factoryDirectoryError} />
-        : <FactoryOverview onNavigate={navigate} onViewOpportunity={openOpportunityDetails} onQuoteOpportunity={openOpportunityQuote} firstName={firstName} requests={factoryRequests} requestFeedError={factoryRequestFeedError} />;
+        : <FactoryOverview onNavigate={navigate} onViewOpportunity={openOpportunityDetails} onQuoteOpportunity={openOpportunityQuote} onConfirmOrder={confirmFactoryOrder} firstName={firstName} factoryProfile={factoryProfile} requests={factoryRequests} quotes={storedQuotes} orders={storedOrders} requestFeedError={factoryRequestFeedError} />;
     }
     if (role === "buyer") {
       if (activePage === "Find Factories") return <Marketplace factories={factories} factoriesLoading={factoriesLoading} factoryDirectoryError={factoryDirectoryError} saved={saved} onToggleSave={toggleSave} onViewFactory={openFactoryProfile} />;
@@ -3260,22 +3895,50 @@ export function DashboardWorkspace({
         />
       );
     }
-    return <FactoryGenericPage page={activePage} onContact={openDialog} onViewOpportunity={openOpportunityDetails} onQuoteOpportunity={openOpportunityQuote} quotes={storedQuotes} quoteFeedError={quoteFeedError} orders={storedOrders} orderFeedError={orderFeedError} onConfirmOrder={confirmFactoryOrder} factoryProfile={factoryProfile} onSaveFactoryProfile={onSaveFactoryProfile} requests={factoryRequests} requestFeedError={factoryRequestFeedError} />;
+    return (
+      <FactoryGenericPage
+        page={activePage}
+        onContact={openDialog}
+        onNavigate={navigate}
+        onViewOpportunity={openOpportunityDetails}
+        onQuoteOpportunity={openOpportunityQuote}
+        quotes={storedQuotes}
+        quoteFeedError={quoteFeedError}
+        orders={storedOrders}
+        orderFeedError={orderFeedError}
+        onConfirmOrder={confirmFactoryOrder}
+        factoryProfile={factoryProfile}
+        onSaveFactoryProfile={onSaveFactoryProfile}
+        factoryTheme={factoryTheme}
+        onChangeFactoryTheme={onChangeFactoryTheme}
+        onResetFactoryAccount={handleResetFactoryWorkspace}
+        onDeleteFactoryAccount={onDeleteFactoryAccount}
+        requests={factoryRequests}
+        requestFeedError={factoryRequestFeedError}
+      />
+    );
   }
 
   return (
-    <div className={`dashboard-workspace ${role === "factory" ? "factory-workspace" : `buyer-workspace buyer-theme-${buyerTheme ?? "default"}`}`}>
+    <div className={`dashboard-workspace ${role === "factory" ? "factory-workspace" : "buyer-workspace"} workspace-theme-${activeTheme}`}>
       {mobileOpen && <button className="sidebar-backdrop" aria-label="Close menu" onClick={() => setMobileOpen(false)} />}
       <aside className={`workspace-sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
         <div className="sidebar-brand-wrap"><DashboardBrand /><button className="sidebar-close" aria-label="Close menu" onClick={() => setMobileOpen(false)}><X size={18} /></button></div>
-        <div className="workspace-switch"><span className={`workspace-switch-icon ${role}`}><BriefcaseBusiness size={16} /></span><span><b>{role === "buyer" ? buyerCompanyName : "Evergreen Apparel"}</b><small>{subtitle}</small></span><ChevronDown size={15} /></div>
+        <div className="workspace-switch"><span className={`workspace-switch-icon ${role}`}><BriefcaseBusiness size={16} /></span><span><b>{role === "buyer" ? buyerCompanyName : factoryCompanyName}</b><small>{subtitle}</small></span><ChevronDown size={15} /></div>
         <span className="sidebar-label">WORKSPACE</span>
         <nav className="sidebar-nav" aria-label="Dashboard navigation">
           {nav.map(({ label, icon: Icon }) => (
             <button key={label} title={label} aria-label={label} className={`sidebar-link ${activePage === label ? "sidebar-link-active" : ""}`} onClick={() => navigate(label)}>
               <Icon size={17} strokeWidth={1.8} /><span>{label}</span>
               {label === "Messages" && <i className="sidebar-count">3</i>}
-              {label === "Production Requests" && role === "factory" && <i className="sidebar-count">12</i>}
+              {label === "Production Requests" && role === "factory" && factoryRequests.length > 0 && <i className="sidebar-count">{factoryRequests.length}</i>}
+              {label === "Received Orders" && role === "factory" && storedOrders.filter((order) => order.status === "PENDING_FACTORY_CONFIRMATION").length > 0 && (
+                <i className="sidebar-count">{storedOrders.filter((order) => order.status === "PENDING_FACTORY_CONFIRMATION").length}</i>
+              )}
+              {label === "Received Quotations" && role === "buyer" && storedQuotes.length > 0 && <i className="sidebar-count">{storedQuotes.length}</i>}
+              {label === "My Orders" && role === "buyer" && storedOrders.filter((order) => order.status !== "CANCELLED").length > 0 && (
+                <i className="sidebar-count">{storedOrders.filter((order) => order.status !== "CANCELLED").length}</i>
+              )}
             </button>
           ))}
         </nav>
@@ -3284,9 +3947,9 @@ export function DashboardWorkspace({
           <button className="sidebar-link logout-link" onClick={() => openDialog("Log out of your account?")}><LogOut size={17} /><span>Log out</span></button>
           <div className="sidebar-user">
             <span className="user-avatar">
-              {buyerAvatarUrl ? (
+              {avatarUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={buyerAvatarUrl} alt={displayName} className="user-avatar-img" />
+                <img src={avatarUrl} alt={displayName} className="user-avatar-img" />
               ) : (
                 initials(displayName || (role === "buyer" ? "Alex Morgan" : "Samira Rahman"))
               )}
@@ -3304,11 +3967,11 @@ export function DashboardWorkspace({
             <label className="top-search"><Search size={15} /><input placeholder="Search anything..." /><kbd>⌘ K</kbd></label>
             <button className={`topbar-icon ${notificationOpen ? "topbar-icon-active" : ""}`} aria-label="Notifications" onClick={() => setNotificationOpen((current) => !current)}><Bell size={18} /><i /></button>
             <span className="topbar-divider" />
-            <button className="topbar-user" onClick={() => role === "buyer" ? navigate("Settings") : setDialog("Account profile")}>
+            <button className="topbar-user" onClick={() => navigate("Settings")}>
               <span className="user-avatar">
-                {buyerAvatarUrl ? (
+                {avatarUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={buyerAvatarUrl} alt={displayName} className="user-avatar-img" />
+                  <img src={avatarUrl} alt={displayName} className="user-avatar-img" />
                 ) : (
                   initials(displayName || "Alex Morgan")
                 )}
@@ -3316,7 +3979,7 @@ export function DashboardWorkspace({
               <ChevronDown size={14} />
             </button>
           </div>
-          {notificationOpen && <div className="notification-popover"><div><strong>Notifications</strong><button onClick={() => setNotificationOpen(false)}><X size={14} /></button></div><p><span className="notification-dot" /><span><b>{role === "buyer" ? "New quotation received" : "New matching request"}</b><small>{role === "buyer" ? "Evergreen Apparel sent a quote · 12 min ago" : "Crewneck tee request matches your profile · 12 min ago"}</small></span></p><p><span className="notification-dot muted-dot" /><span><b>Order update</b><small>Production milestone completed · 2 hours ago</small></span></p><button className="notification-all" onClick={() => { setNotificationOpen(false); navigate("Messages"); }}>View all updates</button></div>}
+          {notificationOpen && <div className="notification-popover"><div><strong>Notifications</strong><button onClick={() => setNotificationOpen(false)}><X size={14} /></button></div><p><span className="notification-dot" /><span><b>{role === "buyer" ? "New quotation received" : "New matching request"}</b><small>{role === "buyer" ? `${storedQuotes[0]?.factoryName || "Evergreen Apparel"} sent a quote · 12 min ago` : "Crewneck tee request matches your profile · 12 min ago"}</small></span></p><p><span className="notification-dot muted-dot" /><span><b>Order update</b><small>Production milestone completed · 2 hours ago</small></span></p><button className="notification-all" onClick={() => { setNotificationOpen(false); navigate("Messages"); }}>View all updates</button></div>}
         </header>
         <main className="workspace-content" key={activePage}>{pageContent()}</main>
         <footer className="workspace-footer"><span>© 2026 Threadline</span><span><a href="#help">Help center</a><a href="#privacy">Privacy</a><a href="#feedback">Send feedback</a></span></footer>

@@ -12,9 +12,11 @@ import {
   Check,
   Eye,
   EyeOff,
+  Factory,
   LockKeyhole,
   Mail,
   ShieldCheck,
+  ShoppingBag,
   Sparkles,
   Shirt,
 } from "lucide-react";
@@ -33,13 +35,17 @@ function LoginForm() {
   const registeredParam = searchParams.get("registered");
   const deletedParam = searchParams.get("deleted");
   const emailParam = searchParams.get("email");
+  const roleParam = searchParams.get("role");
 
+  const [selectedRole, setSelectedRole] = useState<"BUYER" | "FACTORY">(() =>
+    roleParam?.toUpperCase() === "FACTORY" ? "FACTORY" : "BUYER",
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(() =>
     registeredParam === "true"
       ? "Account created successfully! Please sign in with your registered email address and password."
       : deletedParam === "true"
-        ? "Your buyer account has been permanently deleted."
+        ? "Your account has been permanently deleted."
         : null,
   );
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -66,7 +72,7 @@ function LoginForm() {
     setSuccessMessage(null);
 
     try {
-      const user = await login(email, password);
+      const user = await login(email, password, selectedRole);
       localStorage.setItem("rememberMe", String(rememberMe));
       setSuccessMessage(`Welcome back, ${user.fullName}. Taking you to your dashboard...`);
       window.setTimeout(() => {
@@ -140,10 +146,47 @@ function LoginForm() {
           <div className="login-welcome">
             <span className="login-form-eyebrow">YOUR WORKSPACE IS WAITING</span>
             <h2>Welcome back<span>.</span></h2>
-            <p>Sign in with your registered email address and password (Buyer or Factory).</p>
+            <p>Select Buyer or Factory and sign in with your registered email and password.</p>
           </div>
 
           <form className="login-form" onSubmit={handleSubmit(onSubmit)} noValidate>
+            <div className="login-field">
+              <span>Account type</span>
+              <div className="login-role-radio-group" role="radiogroup" aria-label="Select account type">
+                <label className={`login-role-radio ${selectedRole === "BUYER" ? "login-role-radio-active" : ""}`}>
+                  <input
+                    type="radio"
+                    name="loginRole"
+                    value="BUYER"
+                    checked={selectedRole === "BUYER"}
+                    onChange={() => {
+                      setSelectedRole("BUYER");
+                      setErrorMessage(null);
+                    }}
+                    className="login-role-radio-input"
+                  />
+                  <ShoppingBag className="login-role-radio-icon" size={14} />
+                  <span>Buyer</span>
+                </label>
+
+                <label className={`login-role-radio ${selectedRole === "FACTORY" ? "login-role-radio-active" : ""}`}>
+                  <input
+                    type="radio"
+                    name="loginRole"
+                    value="FACTORY"
+                    checked={selectedRole === "FACTORY"}
+                    onChange={() => {
+                      setSelectedRole("FACTORY");
+                      setErrorMessage(null);
+                    }}
+                    className="login-role-radio-input"
+                  />
+                  <Factory className="login-role-radio-icon" size={14} />
+                  <span>Factory</span>
+                </label>
+              </div>
+            </div>
+
             <label className="login-field" htmlFor="email">
               <span>Registered Email address</span>
               <span className={`login-input-wrap ${errors.email ? "login-input-error" : ""}`}>
@@ -152,7 +195,7 @@ function LoginForm() {
                   id="email"
                   type="email"
                   autoComplete="email"
-                  placeholder="e.g. you@company.com"
+                  placeholder={selectedRole === "BUYER" ? "e.g. buyer@brand.com" : "e.g. factory@company.com"}
                   aria-invalid={Boolean(errors.email)}
                   aria-describedby={errors.email ? "email-error" : undefined}
                   {...register("email")}

@@ -2,40 +2,37 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import {
-  ArrowRight,
-} from "lucide-react";
-import { recentPlatformActivity } from "@/lib/adminMockData";
+import { ArrowRight } from "lucide-react";
+import { useAdminData } from "./AdminDataContext";
 
 export function RecentActivity() {
+  const { activities } = useAdminData();
   const [filter, setFilter] = useState<string>("all");
 
-  const filteredItems = recentPlatformActivity.filter((item) => {
+  const filteredItems = activities.filter((item) => {
     if (filter === "all") return true;
-    if (filter === "verifications") return item.category === "verification";
+    if (filter === "verifications") return item.category === "verification" || item.category === "factory";
     if (filter === "orders") return item.category === "order" || item.category === "rfq" || item.category === "quotation";
-    if (filter === "alerts") return item.category === "complaint";
+    if (filter === "buyers") return item.category === "buyer";
     return true;
   });
 
   return (
     <div className="p-6 bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-      {/* Header and Filter Tabs */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
         <div>
           <h2 className="text-lg font-bold text-[#102B46]">Recent Administrative Activity</h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Real-time feed of factory registrations, RFQ submissions, order milestones, and verification requests.
+            Live feed synced across buyer requests, factory quotes, orders, and registrations.
           </p>
         </div>
 
-        {/* Segmented Filter */}
         <div className="inline-flex p-1 bg-slate-100 rounded-xl text-xs font-semibold">
           {[
             { id: "all", label: "All Activity" },
-            { id: "verifications", label: "Verifications" },
+            { id: "verifications", label: "Factories" },
             { id: "orders", label: "Orders & RFQs" },
-            { id: "alerts", label: "Alerts" },
+            { id: "buyers", label: "Buyers" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -52,16 +49,14 @@ export function RecentActivity() {
         </div>
       </div>
 
-      {/* Activity List */}
       <div className="divide-y divide-slate-100">
-        {filteredItems.map((item) => {
-          return (
+        {filteredItems.length > 0 ? (
+          filteredItems.slice(0, 12).map((item) => (
             <div
               key={item.id}
               className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 hover:bg-slate-50/70 px-2 rounded-xl transition-colors group"
             >
               <div className="flex items-start gap-3.5">
-                {/* Avatar Badge */}
                 <div className="flex items-center justify-center w-10 h-10 rounded-xl bg-slate-100 border border-slate-200/70 text-[#102B46] font-bold text-xs shrink-0 shadow-xs">
                   {item.avatarText || "TG"}
                 </div>
@@ -89,7 +84,6 @@ export function RecentActivity() {
                 </div>
               </div>
 
-              {/* Timestamp & Action Button */}
               <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
                 <span className="text-xs text-slate-400 whitespace-nowrap">{item.relativeTime}</span>
                 {item.actionLabel && (
@@ -103,8 +97,12 @@ export function RecentActivity() {
                 )}
               </div>
             </div>
-          );
-        })}
+          ))
+        ) : (
+          <div className="py-10 text-center text-xs text-slate-500">
+            No activity matches this filter yet. Updates appear automatically as buyers and factories act.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -39,6 +39,9 @@ export interface FactoryProfileDetails {
   country: string;
   city: string;
   website: string;
+  photoURL?: string;
+  coverPhotoURL?: string;
+  theme?: BuyerTheme;
   monthlyCapacity: number;
   moq: number;
   processes: string[];
@@ -46,4 +49,23 @@ export interface FactoryProfileDetails {
   workerCount?: number;
   productionLines?: number;
   machineInformation?: string;
+}
+
+export interface AdminProfileDetails {
+  fullName: string;
+  email: string;
+  phone: string;
+  department: string;
+  website: string;
+  adminRole: AdminRole;
+  photoURL?: string;
+  theme?: BuyerTheme;
+}
+
+export interface AdminPlatformSettings {
+  commissionRate: number;
+  autoVerifyCompleteFactories: boolean;
+  defaultCurrency: 'USD' | 'EUR' | 'GBP';
+  maintenanceBanner: string;
+  updatedAt?: string;
 }

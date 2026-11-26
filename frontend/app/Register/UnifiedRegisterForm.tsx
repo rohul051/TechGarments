@@ -163,10 +163,10 @@ export function UnifiedRegisterForm({
 
       setSubmitted(true);
 
-      // Transition smoothly to the login page with prefilled registered email
+      // Transition smoothly to the login page with prefilled registered email and role
       window.setTimeout(() => {
         router.push(
-          `/login?registered=true&email=${encodeURIComponent(email)}`,
+          `/login?registered=true&email=${encodeURIComponent(email)}&role=${selectedRole}`,
         );
       }, 1200);
     } catch (err) {

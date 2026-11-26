@@ -33,46 +33,43 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { logout } from "@/lib/auth";
+import { formatAdminRoleLabel } from "@/lib/adminSettings";
 import { useCurrentUser } from "@/lib/useCurrentUser";
+import { adminNavigationMeta, type AdminNavMeta } from "@/lib/adminNavigation";
+import { useAdminData } from "./AdminDataContext";
 
-export interface NavItemConfig {
-  id: string;
-  label: string;
-  href: string;
+export interface NavItemConfig extends AdminNavMeta {
   icon: LucideIcon;
-  badge?: string | number;
-  badgeTone?: "neutral" | "success" | "warning" | "danger";
-  section?: "core" | "operations" | "monitoring" | "governance";
 }
 
-export const adminNavigationItems: NavItemConfig[] = [
-  // Core Platform
-  { id: "overview", label: "Overview", href: "/admin/dashboard", icon: LayoutDashboard, section: "core" },
-  { id: "factories", label: "Factory Management", href: "/admin/factories", icon: Factory, badge: 348, section: "core" },
-  { id: "buyers", label: "Buyer Management", href: "/admin/buyers", icon: ShoppingBag, badge: "1.1k", section: "core" },
-  { id: "verifications", label: "Verification Center", href: "/admin/verifications", icon: BadgeCheck, badge: 23, badgeTone: "warning", section: "core" },
-  { id: "resources", label: "Resource Management", href: "/admin/resources", icon: Boxes, section: "core" },
+const ADMIN_NAV_ICONS: Record<string, LucideIcon> = {
+  overview: LayoutDashboard,
+  factories: Factory,
+  buyers: ShoppingBag,
+  verifications: BadgeCheck,
+  resources: Boxes,
+  rfqs: FileText,
+  quotations: FileSpreadsheet,
+  contracts: FileSignature,
+  orders: PackageCheck,
+  production: Activity,
+  "quality-control": CheckCircle2,
+  shipments: Truck,
+  payments: CreditCard,
+  disputes: Scale,
+  reviews: Star,
+  "ai-monitoring": Bot,
+  analytics: BarChart3,
+  notifications: Bell,
+  administrators: Users,
+  "audit-logs": History,
+  settings: Settings,
+};
 
-  // Commercial Operations
-  { id: "rfqs", label: "RFQ Management", href: "/admin/rfqs", icon: FileText, badge: 42, section: "operations" },
-  { id: "quotations", label: "Quotation Management", href: "/admin/quotations", icon: FileSpreadsheet, section: "operations" },
-  { id: "contracts", label: "Contract Management", href: "/admin/contracts", icon: FileSignature, section: "operations" },
-  { id: "orders", label: "Order Management", href: "/admin/orders", icon: PackageCheck, badge: 147, section: "operations" },
-  { id: "production", label: "Production Monitoring", href: "/admin/production", icon: Activity, section: "operations" },
-  { id: "quality-control", label: "Quality Control", href: "/admin/quality-control", icon: CheckCircle2, section: "operations" },
-  { id: "shipments", label: "Shipment Management", href: "/admin/shipments", icon: Truck, section: "operations" },
-  { id: "payments", label: "Payment Management", href: "/admin/payments", icon: CreditCard, section: "operations" },
-
-  // Governance & Intelligence
-  { id: "disputes", label: "Disputes & Complaints", href: "/admin/disputes", icon: Scale, badge: 2, badgeTone: "danger", section: "governance" },
-  { id: "reviews", label: "Reviews & Ratings", href: "/admin/reviews", icon: Star, section: "governance" },
-  { id: "ai-monitoring", label: "AI Monitoring", href: "/admin/ai-monitoring", icon: Bot, badge: "Live", badgeTone: "success", section: "governance" },
-  { id: "analytics", label: "Analytics & Reports", href: "/admin/analytics", icon: BarChart3, section: "governance" },
-  { id: "notifications", label: "Notifications", href: "/admin/notifications", icon: Bell, badge: 4, badgeTone: "warning", section: "governance" },
-  { id: "administrators", label: "Admin Management", href: "/admin/administrators", icon: Users, section: "governance" },
-  { id: "audit-logs", label: "Audit Logs", href: "/admin/audit-logs", icon: History, section: "governance" },
-  { id: "settings", label: "Settings", href: "/admin/settings", icon: Settings, section: "governance" },
-];
+export const adminNavigationItems: NavItemConfig[] = adminNavigationMeta.map((item) => ({
+  ...item,
+  icon: ADMIN_NAV_ICONS[item.id] ?? LayoutDashboard,
+}));
 
 interface AdminSidebarProps {
   collapsed: boolean;
@@ -90,6 +87,7 @@ export function AdminSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const currentUser = useCurrentUser();
+  const { sidebarBadges, hasMounted } = useAdminData();
 
   const handleLogout = () => {
     logout();
@@ -109,11 +107,9 @@ export function AdminSidebar({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 flex flex-col bg-[#102B46] text-white border-r border-[#1A3E61] transition-all duration-300 ease-in-out ${
-          collapsed ? "w-[76px]" : "w-[280px]"
-        } ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
-        }`}
+        className={`fixed top-0 bottom-0 left-0 z-50 flex flex-col bg-[#102B46] text-white border-r border-[#1A3E61] transition-all duration-300 ease-in-out ${collapsed ? "w-[76px]" : "w-[280px]"
+          } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+          }`}
       >
         {/* Brand Header */}
         <div className="flex items-center justify-between h-[68px] px-4 border-b border-[#1A3E61]">
@@ -163,6 +159,7 @@ export function AdminSidebar({
         <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-1 custom-scrollbar">
           {adminNavigationItems.map((item) => {
             const Icon = item.icon;
+            const badge = sidebarBadges[item.id] ?? item.badge;
             const isActive =
               pathname === item.href ||
               (item.href !== "/admin/dashboard" && pathname.startsWith(item.href));
@@ -173,34 +170,31 @@ export function AdminSidebar({
                 href={item.href}
                 onClick={onCloseMobile}
                 title={collapsed ? item.label : undefined}
-                className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
-                  isActive
-                    ? "bg-[#16A36A] text-white font-semibold shadow-sm"
-                    : "text-slate-300 hover:bg-[#1A3E61] hover:text-white"
-                } ${collapsed ? "justify-center px-0" : ""}`}
+                className={`relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${isActive
+                  ? "bg-[#16A36A] text-white font-semibold shadow-sm"
+                  : "text-slate-300 hover:bg-[#1A3E61] hover:text-white"
+                  } ${collapsed ? "justify-center px-0" : ""}`}
               >
                 <Icon
-                  className={`shrink-0 ${
-                    isActive ? "text-white" : "text-slate-300 group-hover:text-white"
-                  } ${collapsed ? "w-5 h-5" : "w-4 h-4"}`}
+                  className={`shrink-0 ${isActive ? "text-white" : "text-slate-300 group-hover:text-white"
+                    } ${collapsed ? "w-5 h-5" : "w-4 h-4"}`}
                 />
 
                 {!collapsed && (
                   <>
                     <span className="flex-1 truncate">{item.label}</span>
-                    {item.badge && (
+                    {badge !== undefined && (
                       <span
-                        className={`px-1.5 py-0.5 text-[11px] font-bold rounded-full ${
-                          item.badgeTone === "danger"
-                            ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
-                            : item.badgeTone === "warning"
+                        className={`px-1.5 py-0.5 text-[11px] font-bold rounded-full ${item.badgeTone === "danger"
+                          ? "bg-rose-500/20 text-rose-300 border border-rose-500/30"
+                          : item.badgeTone === "warning"
                             ? "bg-amber-500/20 text-amber-300 border border-amber-500/30"
                             : item.badgeTone === "success"
-                            ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                            : "bg-[#1A3E61] text-slate-200"
-                        }`}
+                              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                              : "bg-[#1A3E61] text-slate-200"
+                          }`}
                       >
-                        {item.badge}
+                        {badge}
                       </span>
                     )}
                   </>
@@ -213,15 +207,23 @@ export function AdminSidebar({
         {/* User Profile & Footer Section */}
         <div className="p-3 border-t border-[#1A3E61] bg-[#0B1D30]/70">
           <div
-            className={`flex items-center gap-3 p-2 rounded-lg bg-[#102B46] border border-[#1A3E61] ${
-              collapsed ? "justify-center p-2" : ""
-            }`}
+            className={`flex items-center gap-3 p-2 rounded-lg bg-[#102B46] border border-[#1A3E61] ${collapsed ? "justify-center p-2" : ""
+              }`}
           >
             <div
               suppressHydrationWarning
-              className="relative flex items-center justify-center w-9 h-9 rounded-full bg-gradient-to-tr from-[#16A36A] to-emerald-400 text-white font-bold text-xs shrink-0 shadow-inner"
+              className="relative flex items-center justify-center w-9 h-9 rounded-full bg-gradient-to-tr from-[#16A36A] to-emerald-400 text-white font-bold text-xs shrink-0 shadow-inner overflow-visible"
             >
-              {currentUser?.fullName?.charAt(0).toUpperCase() || "A"}
+              {hasMounted && currentUser?.photoURL ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={currentUser.photoURL}
+                  alt={currentUser.fullName || "Admin"}
+                  className="w-9 h-9 rounded-full object-cover"
+                />
+              ) : (
+                currentUser?.fullName?.charAt(0).toUpperCase() || "A"
+              )}
               <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-400 border-2 border-[#102B46] rounded-full" />
             </div>
 
@@ -230,8 +232,8 @@ export function AdminSidebar({
                 <p suppressHydrationWarning className="text-xs font-semibold text-white truncate">
                   {currentUser?.fullName || "Administrator"}
                 </p>
-                <span className="inline-block px-1.5 py-0.2 text-[10px] font-medium text-emerald-300 bg-emerald-950/60 rounded">
-                  Super Admin
+                <span suppressHydrationWarning className="inline-block px-1.5 py-0.2 text-[10px] font-medium text-emerald-300 bg-emerald-950/60 rounded">
+                  {hasMounted ? formatAdminRoleLabel(currentUser?.adminRole) : "Super Admin"}
                 </span>
               </div>
             )}

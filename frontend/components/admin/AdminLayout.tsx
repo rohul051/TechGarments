@@ -4,20 +4,59 @@ import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { AdminSidebar } from "./AdminSidebar";
 import { AdminHeader } from "./AdminHeader";
+import { AdminDataProvider, useAdminData } from "./AdminDataContext";
 import { getUser } from "@/lib/auth";
 import type { User } from "@/types/user";
-import { ShieldCheck, ArrowRight, UserCheck } from "lucide-react";
+import { ShieldCheck, ArrowRight, UserCheck, Megaphone } from "lucide-react";
 
 interface AdminLayoutProps {
   children: React.ReactNode;
 }
 
-const emptySubscribe = () => () => {};
+const emptySubscribe = () => () => { };
+
+function AdminPortalShell({ children }: { children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const { adminTheme, platformSettings, hasMounted } = useAdminData();
+
+  return (
+    <div className={`min-h-screen bg-[#F8FAFC] text-slate-900 flex admin-portal admin-theme-${adminTheme}`}>
+      {/* Sidebar Navigation */}
+      <AdminSidebar
+        collapsed={collapsed}
+        onToggleCollapse={() => setCollapsed(!collapsed)}
+        mobileOpen={mobileOpen}
+        onCloseMobile={() => setMobileOpen(false)}
+      />
+
+      {/* Main Content Area */}
+      <div
+        className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out ${
+          collapsed ? "lg:pl-[76px]" : "lg:pl-[280px]"
+        }`}
+      >
+        {/* Top Header */}
+        <AdminHeader onOpenMobileSidebar={() => setMobileOpen(true)} />
+
+        {hasMounted && platformSettings.maintenanceBanner && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 md:px-8 py-2 text-xs text-amber-900 flex items-center gap-2 admin-banner-notice">
+            <Megaphone className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span className="font-medium">{platformSettings.maintenanceBanner}</span>
+          </div>
+        )}
+
+        {/* Page Content */}
+        <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto">
+          {children}
+        </main>
+      </div>
+    </div>
+  );
+}
 
 export function AdminLayout({ children }: AdminLayoutProps) {
   const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [devAdminOverride, setDevAdminOverride] = useState(false);
 
   // Read admin authorization status with useSyncExternalStore:
@@ -78,29 +117,8 @@ export function AdminLayout({ children }: AdminLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 flex">
-      {/* Sidebar Navigation (21 items) */}
-      <AdminSidebar
-        collapsed={collapsed}
-        onToggleCollapse={() => setCollapsed(!collapsed)}
-        mobileOpen={mobileOpen}
-        onCloseMobile={() => setMobileOpen(false)}
-      />
-
-      {/* Main Content Area */}
-      <div
-        className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out ${
-          collapsed ? "lg:pl-[76px]" : "lg:pl-[280px]"
-        }`}
-      >
-        {/* Top Header */}
-        <AdminHeader onOpenMobileSidebar={() => setMobileOpen(true)} />
-
-        {/* Page Content */}
-        <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto">
-          {children}
-        </main>
-      </div>
-    </div>
+    <AdminDataProvider>
+      <AdminPortalShell>{children}</AdminPortalShell>
+    </AdminDataProvider>
   );
 }

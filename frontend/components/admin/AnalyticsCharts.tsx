@@ -1,34 +1,35 @@
 "use client";
 
 import { useState } from "react";
-import {
-  TrendingUp,
-  Download,
-} from "lucide-react";
-import {
-  transactionVolumeTrend,
-  orderStatusDistribution,
-  factoryVerificationStats,
-} from "@/lib/adminMockData";
+import { TrendingUp, Download } from "lucide-react";
+import { useAdminData } from "./AdminDataContext";
 
 export function AnalyticsCharts() {
+  const {
+    transactionTrend,
+    orderStatusBreakdown,
+    verificationBreakdown,
+    orders,
+    factories,
+    totalOrderValue,
+  } = useAdminData();
+
   const [timeframe, setTimeframe] = useState<"7D" | "30D" | "90D" | "1Y">("1Y");
   const [activeDataset, setActiveDataset] = useState<"volume" | "revenue">("volume");
 
-  // Calculate maximum for SVG normalization
-  const maxVolume = Math.max(...transactionVolumeTrend.map((d) => d.volume));
+  const values = transactionTrend.map((d) => (activeDataset === "volume" ? d.volume : d.revenue));
+  const maxVal = Math.max(1, ...values);
 
-  // Generate smooth SVG polyline points
   const chartHeight = 200;
   const chartWidth = 700;
   const paddingX = 40;
   const paddingY = 20;
 
-  const points = transactionVolumeTrend
+  const points = transactionTrend
     .map((item, index) => {
-      const x = paddingX + (index / (transactionVolumeTrend.length - 1)) * (chartWidth - paddingX * 2);
-      const val = activeDataset === "volume" ? item.volume : item.revenue * 20;
-      const y = chartHeight - paddingY - (val / (maxVolume * 1.1)) * (chartHeight - paddingY * 2);
+      const x = paddingX + (index / (transactionTrend.length - 1)) * (chartWidth - paddingX * 2);
+      const val = activeDataset === "volume" ? item.volume : item.revenue;
+      const y = chartHeight - paddingY - (val / (maxVal * 1.15)) * (chartHeight - paddingY * 2);
       return `${x},${y}`;
     })
     .join(" ");
@@ -37,41 +38,45 @@ export function AnalyticsCharts() {
     chartWidth - paddingX
   },${chartHeight - paddingY}`;
 
+  const activeOrderCount = orders.filter((o) => o.status !== "CANCELLED").length;
+  const confirmedCount = orders.filter((o) => o.status === "CONFIRMED").length;
+  const pendingVerifications = factories.filter((f) => !f.verified).length;
+  const estimatedFees = Math.round(totalOrderValue * 0.05);
+
   const handleExportCSV = () => {
-    const headers = "Month,Volume_USD_Thousands,Platform_Revenue_USD_Thousands,Orders_Count\n";
-    const rows = transactionVolumeTrend
-      .map((d) => `${d.month},$${d.volume}k,$${d.revenue}k,${d.ordersCount}`)
+    const headers = "Month,Volume_USD_Thousands,Estimated_Platform_Fee_USD_Thousands,Orders_Count\n";
+    const rows = transactionTrend
+      .map((d) => `${d.month},${d.volume},${d.revenue},${d.ordersCount}`)
       .join("\n");
     const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", `TechGarments_Analytics_${timeframe}.csv`);
+    link.setAttribute("download", `TechGarments_Live_Analytics_${timeframe}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="space-y-6">
       {/* Main Chart Section: Platform Transaction Volume */}
       <div className="p-6 bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
-        {/* Header Controls */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-slate-100">
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-bold text-[#102B46]">Platform Transaction Volume &amp; Growth</h2>
               <span className="px-2 py-0.5 text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-md border border-emerald-200">
-                Live Audited Data
+                Live Marketplace Data
               </span>
             </div>
             <p className="mt-1 text-xs text-slate-500">
-              Monthly garment production orders finalized across buyers and factories.
+              Monthly order totals tracked live across registered buyers and factories.
             </p>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Metric Toggle */}
             <div className="inline-flex p-1 bg-slate-100 rounded-lg text-xs font-medium">
               <button
                 onClick={() => setActiveDataset("volume")}
@@ -81,7 +86,7 @@ export function AnalyticsCharts() {
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                GMV Volume ($)
+                Order Volume ($)
               </button>
               <button
                 onClick={() => setActiveDataset("revenue")}
@@ -91,11 +96,10 @@ export function AnalyticsCharts() {
                     : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                Platform Fees
+                Est. Platform Fees (5%)
               </button>
             </div>
 
-            {/* Timeframe selector */}
             <div className="inline-flex p-1 bg-slate-100 rounded-lg text-xs font-medium">
               {(["7D", "30D", "90D", "1Y"] as const).map((t) => (
                 <button
@@ -112,7 +116,6 @@ export function AnalyticsCharts() {
               ))}
             </div>
 
-            {/* CSV Export */}
             <button
               onClick={handleExportCSV}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200/80 rounded-lg transition-colors"
@@ -124,14 +127,15 @@ export function AnalyticsCharts() {
           </div>
         </div>
 
-        {/* Visual Responsive SVG Area Chart */}
         <div className="pt-6">
           <div className="flex items-baseline gap-3 mb-4">
             <span className="text-3xl font-extrabold text-[#102B46]">
-              {activeDataset === "volume" ? "$14,280,000" : "$714,000"}
+              ${(activeDataset === "volume" ? totalOrderValue : estimatedFees).toLocaleString("en-US", {
+                maximumFractionDigits: 0,
+              })}
             </span>
             <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600">
-              <TrendingUp className="w-4 h-4" /> +18.7% vs previous period
+              <TrendingUp className="w-4 h-4" /> Across {activeOrderCount} active orders ({confirmedCount} confirmed)
             </span>
           </div>
 
@@ -148,15 +152,12 @@ export function AnalyticsCharts() {
                 </linearGradient>
               </defs>
 
-              {/* Grid Lines */}
               <line x1={paddingX} y1={paddingY} x2={chartWidth - paddingX} y2={paddingY} stroke="#E2E8F0" strokeDasharray="3 3" />
               <line x1={paddingX} y1={chartHeight / 2} x2={chartWidth - paddingX} y2={chartHeight / 2} stroke="#E2E8F0" strokeDasharray="3 3" />
               <line x1={paddingX} y1={chartHeight - paddingY} x2={chartWidth - paddingX} y2={chartHeight - paddingY} stroke="#CBD5E1" />
 
-              {/* Area fill */}
               <polygon points={areaPoints} fill="url(#chartGradient)" />
 
-              {/* Line */}
               <polyline
                 fill="none"
                 stroke="#16A36A"
@@ -166,11 +167,10 @@ export function AnalyticsCharts() {
                 points={points}
               />
 
-              {/* Data Checkpoints */}
-              {transactionVolumeTrend.map((item, index) => {
-                const x = paddingX + (index / (transactionVolumeTrend.length - 1)) * (chartWidth - paddingX * 2);
-                const val = activeDataset === "volume" ? item.volume : item.revenue * 20;
-                const y = chartHeight - paddingY - (val / (maxVolume * 1.1)) * (chartHeight - paddingY * 2);
+              {transactionTrend.map((item, index) => {
+                const x = paddingX + (index / (transactionTrend.length - 1)) * (chartWidth - paddingX * 2);
+                const val = activeDataset === "volume" ? item.volume : item.revenue;
+                const y = chartHeight - paddingY - (val / (maxVal * 1.15)) * (chartHeight - paddingY * 2);
 
                 return (
                   <g key={item.month} className="group cursor-pointer">
@@ -180,23 +180,21 @@ export function AnalyticsCharts() {
                       r="4"
                       className="fill-white stroke-[#102B46] stroke-2 group-hover:r-6 group-hover:stroke-[#16A36A] transition-all"
                     />
-                    {/* Tooltip on hover */}
                     <text
                       x={x}
                       y={y - 10}
                       textAnchor="middle"
                       className="text-[11px] font-bold fill-[#102B46] opacity-0 group-hover:opacity-100 transition-opacity"
                     >
-                      ${item.volume}k
+                      ${val}k
                     </text>
                   </g>
                 );
               })}
             </svg>
 
-            {/* X-Axis Labels */}
             <div className="flex justify-between px-6 pt-2 text-[11px] font-semibold text-slate-400">
-              {transactionVolumeTrend.map((d) => (
+              {transactionTrend.map((d) => (
                 <span key={d.month}>{d.month}</span>
               ))}
             </div>
@@ -206,24 +204,25 @@ export function AnalyticsCharts() {
 
       {/* Two Column Grid: Pipeline Status & Factory Verification */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Order Status Breakdown */}
         <div className="p-6 bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
           <div className="flex items-center justify-between pb-4 border-b border-slate-100">
             <div>
-              <h3 className="text-base font-bold text-[#102B46]">Order Production Status</h3>
-              <p className="text-xs text-slate-500 mt-0.5">147 active orders in progress</p>
+              <h3 className="text-base font-bold text-[#102B46]">Order &amp; RFQ Pipeline Status</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {activeOrderCount} active orders · {confirmedCount} confirmed by factory
+              </p>
             </div>
             <span className="text-xs font-semibold text-[#16A36A] bg-[#16A36A]/10 px-2 py-0.5 rounded-full">
-              98.4% On Schedule
+              {activeOrderCount > 0 ? `${Math.round((confirmedCount / activeOrderCount) * 100)}% Confirmed` : "Live"}
             </span>
           </div>
 
           <div className="mt-5 space-y-4">
-            {orderStatusDistribution.map((item) => (
+            {orderStatusBreakdown.map((item) => (
               <div key={item.status} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs font-semibold">
                   <span className="text-slate-700">{item.status}</span>
-                  <span className="text-slate-900">{item.count} orders ({item.percentage}%)</span>
+                  <span className="text-slate-900">{item.count} ({item.percentage}%)</span>
                 </div>
                 <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
                   <div
@@ -239,20 +238,21 @@ export function AnalyticsCharts() {
           </div>
         </div>
 
-        {/* Factory Verification Status */}
         <div className="p-6 bg-white border border-slate-200/80 rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.03)]">
           <div className="flex items-center justify-between pb-4 border-b border-slate-100">
             <div>
-              <h3 className="text-base font-bold text-[#102B46]">Factory Compliance &amp; Verification</h3>
-              <p className="text-xs text-slate-500 mt-0.5">348 onboarded manufacturing partners</p>
+              <h3 className="text-base font-bold text-[#102B46]">Factory Compliance &amp; Readiness</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                {factories.length} registered manufacturing partners
+              </p>
             </div>
             <span className="text-xs font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
-              23 Action Required
+              {pendingVerifications} Pending Review
             </span>
           </div>
 
           <div className="mt-5 space-y-4">
-            {factoryVerificationStats.map((item) => (
+            {verificationBreakdown.map((item) => (
               <div key={item.status} className="space-y-1.5">
                 <div className="flex items-center justify-between text-xs font-semibold">
                   <span className="text-slate-700">{item.status}</span>

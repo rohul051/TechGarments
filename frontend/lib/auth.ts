@@ -15,7 +15,7 @@ import {
 } from 'firebase/auth';
 import { deleteDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import type { BuyerTheme, Role, User } from '@/types/user';
+import type { AdminRole, BuyerTheme, Role, User } from '@/types/user';
 
 export interface AccountRecord {
   id?: string;
@@ -23,6 +23,7 @@ export interface AccountRecord {
   password: string;
   fullName: string;
   role: Role;
+  adminRole?: AdminRole;
   phone?: string;
   companyName?: string;
   buyerType?: string;
@@ -30,6 +31,7 @@ export interface AccountRecord {
   city?: string;
   website?: string;
   photoURL?: string;
+  coverPhotoURL?: string;
   theme?: BuyerTheme;
   monthlyCapacity?: number;
   moq?: number;
@@ -117,7 +119,9 @@ export async function restoreUserFromFirebase(): Promise<User | null> {
 
   const photoURL =
     account?.photoURL ||
-    (typeof userProfile.photoURL === 'string' ? userProfile.photoURL : undefined);
+    (typeof userProfile.photoURL === 'string' ? userProfile.photoURL : undefined) ||
+    (typeof factoryDocData?.photoURL === 'string' ? factoryDocData.photoURL : undefined) ||
+    (typeof buyerDocData?.photoURL === 'string' ? buyerDocData.photoURL : undefined);
 
   const user: User = {
     id: firebaseUser.uid,
@@ -132,7 +136,7 @@ export async function restoreUserFromFirebase(): Promise<User | null> {
     role,
     ...(photoURL ? { photoURL } : {}),
     ...(account?.theme ? { theme: account.theme } : {}),
-    ...(role === 'ADMIN' ? { adminRole: 'SUPER_ADMIN' as const } : {}),
+    ...(role === 'ADMIN' ? { adminRole: account?.adminRole ?? ('SUPER_ADMIN' as const) } : {}),
   };
   saveCurrentUser(user);
   return user;
@@ -175,6 +179,16 @@ export function getRegisteredAccounts(): Record<string, AccountRecord> {
   }
 }
 
+function notifyRegisteredAccountsUpdated(): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event('garmentconnect:accounts-updated'));
+  if (typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel('garmentconnect-registered-users');
+    channel.postMessage('updated');
+    channel.close();
+  }
+}
+
 /**
  * Save an account into local persistence (indexed strictly by email)
  */
@@ -192,6 +206,7 @@ export function saveRegisteredAccount(account: AccountRecord): void {
     current[cleanEmail] = record;
 
     localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(current));
+    notifyRegisteredAccountsUpdated();
   } catch (err) {
     console.error('Failed to save user account:', err);
     throw err;
@@ -214,6 +229,7 @@ export function removeRegisteredAccount(email: string): void {
     }
 
     localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(current));
+    notifyRegisteredAccountsUpdated();
   } catch (err) {
     console.error('Failed to remove local user account:', err);
   }
@@ -372,7 +388,11 @@ export async function register(accountData: AccountRecord): Promise<User> {
 /**
  * Login with registered Email ID + Password (supports Buyer, Factory, and Admin)
  */
-export async function login(emailInput: string, password: string): Promise<User> {
+export async function login(
+  emailInput: string,
+  password: string,
+  expectedRole?: "BUYER" | "FACTORY",
+): Promise<User> {
   await new Promise((resolve) => setTimeout(resolve, 300));
   const cleanEmail = emailInput.trim().toLowerCase();
   if (!cleanEmail || !cleanEmail.includes('@')) {
@@ -403,6 +423,10 @@ export async function login(emailInput: string, password: string): Promise<User>
 
     const role = normalizeRole(resolvedMatched.role);
     if (!role) throw new Error('This account has an invalid role. Contact support for help.');
+    if (expectedRole && role !== 'ADMIN' && role !== expectedRole) {
+      const accountLabel = role === 'BUYER' ? 'Buyer' : 'Factory';
+      throw new Error(`This email is registered as a ${accountLabel} account. Select ${accountLabel} above to sign in.`);
+    }
 
     const userId = resolvedMatched.id || `local:${resolvedMatched.email.trim().toLowerCase()}`;
 
@@ -413,7 +437,7 @@ export async function login(emailInput: string, password: string): Promise<User>
       role,
       ...(resolvedMatched.photoURL ? { photoURL: resolvedMatched.photoURL } : {}),
       ...(resolvedMatched.theme ? { theme: resolvedMatched.theme } : {}),
-      ...(role === 'ADMIN' ? { adminRole: 'SUPER_ADMIN' as const } : {}),
+      ...(role === 'ADMIN' ? { adminRole: resolvedMatched.adminRole ?? ('SUPER_ADMIN' as const) } : {}),
     };
 
     saveCurrentUser(user);
@@ -478,7 +502,10 @@ export async function login(emailInput: string, password: string): Promise<User>
           if (typeof fData.country === 'string') resolvedCountry = fData.country;
           if (typeof fData.city === 'string') resolvedCity = fData.city;
           if (typeof fData.website === 'string') resolvedWebsite = fData.website;
+          if (typeof fData.photoURL === 'string' && fData.photoURL) resolvedPhotoURL = fData.photoURL;
+          if (typeof fData.theme === 'string') resolvedTheme = normalizeBuyerTheme(fData.theme);
           factoryExtras = {
+            ...(typeof fData.coverPhotoURL === 'string' && fData.coverPhotoURL ? { coverPhotoURL: fData.coverPhotoURL } : {}),
             ...(typeof fData.monthlyCapacity === 'number' ? { monthlyCapacity: fData.monthlyCapacity } : {}),
             ...(typeof fData.moq === 'number' ? { moq: fData.moq } : {}),
             ...(Array.isArray(fData.processes) ? { processes: fData.processes.filter((v): v is string => typeof v === 'string') } : {}),
@@ -510,6 +537,12 @@ export async function login(emailInput: string, password: string): Promise<User>
       }
     }
 
+    if (expectedRole && resolvedRole !== 'ADMIN' && resolvedRole !== expectedRole) {
+      await firebaseSignOut(auth).catch(() => {});
+      const accountLabel = resolvedRole === 'BUYER' ? 'Buyer' : 'Factory';
+      throw new Error(`This email is registered as a ${accountLabel} account. Select ${accountLabel} above to sign in.`);
+    }
+
     saveRegisteredAccount({
       id: firebaseUid,
       email: cleanEmail,
@@ -534,12 +567,15 @@ export async function login(emailInput: string, password: string): Promise<User>
       role: resolvedRole,
       ...(resolvedPhotoURL ? { photoURL: resolvedPhotoURL } : {}),
       ...(resolvedTheme ? { theme: resolvedTheme } : {}),
-      ...(resolvedRole === 'ADMIN' ? { adminRole: 'SUPER_ADMIN' as const } : {}),
+      ...(resolvedRole === 'ADMIN' ? { adminRole: findAccount(cleanEmail)?.adminRole ?? ('SUPER_ADMIN' as const) } : {}),
     };
     saveCurrentUser(user);
     return user;
   } catch (firebaseError: unknown) {
-    if (firebaseError instanceof Error && firebaseError.message.includes('deleted')) {
+    if (firebaseError instanceof Error && (
+      firebaseError.message.includes('deleted') ||
+      firebaseError.message.includes('registered as a ')
+    )) {
       throw firebaseError;
     }
     const code = getFirebaseErrorCode(firebaseError);
@@ -748,7 +784,7 @@ export async function changeUserPassword(
 
   return firebaseUpdated
     ? 'Password updated in Firebase Authentication and synced to your account.'
-    : 'Password updated for your local buyer account.';
+    : 'Password updated for your local account.';
 }
 
 export async function sendUserPasswordReset(email: string): Promise<string> {
@@ -820,11 +856,14 @@ export async function deleteUserAccount(email: string, password: string): Promis
     }
 
     const now = new Date().toISOString();
-    try {
-      await deleteDoc(doc(db, 'buyers', firebaseUser.uid));
-    } catch (err) {
-      console.warn('[Account Delete] Could not delete buyers doc:', err);
-    }
+    await Promise.all([
+      deleteDoc(doc(db, 'buyers', firebaseUser.uid)).catch((err) => {
+        console.warn('[Account Delete] Could not delete buyers doc:', err);
+      }),
+      deleteDoc(doc(db, 'factories', firebaseUser.uid)).catch((err) => {
+        console.warn('[Account Delete] Could not delete factories doc:', err);
+      }),
+    ]);
     try {
       await setDoc(
         doc(db, 'users', firebaseUser.uid),
@@ -864,6 +903,9 @@ export async function deleteUserAccount(email: string, password: string): Promis
     localStorage.removeItem(`techgarments_buyer_theme_${cleanEmail}`);
     localStorage.removeItem(`techgarments_saved_factories_${cleanEmail}`);
     localStorage.removeItem(`techgarments_buyer_notifications_${cleanEmail}`);
+    localStorage.removeItem(`techgarments_factory_theme_${cleanEmail}`);
+    localStorage.removeItem(`techgarments_factory_notifications_${cleanEmail}`);
+    localStorage.removeItem(`techgarments_admin_theme_${cleanEmail}`);
   }
   logout();
 }
